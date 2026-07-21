@@ -188,6 +188,9 @@ function recoverAdministratorAccessFromSheet() {
   properties.setProperty('WAREHOUSE_SPREADSHEET_ID', spreadsheet.getId());
   var result = recoverAdministratorAccess_(spreadsheet, operator);
   var recoveryMessage = 'اسم المستخدم: ' + result.username + '\nكلمة المرور المؤقتة: ' + result.temporaryPassword + '\n\nانسخها الآن؛ لن تظهر مرة أخرى.';
+  if (result.duplicateAdministratorsArchived) {
+    recoveryMessage += '\n\nتم تعطيل وأرشفة ' + result.duplicateAdministratorsArchived + ' حساب admin مكرر.';
+  }
   if (result.warning) recoveryMessage += '\n\nتنبيه: ' + result.warning;
   ui.alert(
     'تمت الاستعادة',
@@ -201,6 +204,7 @@ function recoverAdministratorAccess_(spreadsheet, operator) {
   return withScriptLock_(function () {
     operator = operator || requireSpreadsheetOwner_(spreadsheet);
     setupRepository_(spreadsheet);
+    var duplicateRepair = archiveDuplicateAdministratorRows_();
     var users = allUserRecords_();
     if (!users.length) {
       throw new WarehouseError_('SYSTEM_NOT_INITIALIZED', 'لا يوجد مستخدمون. استخدم «تهيئة النظام» بدلاً من الاستعادة.');
@@ -244,7 +248,10 @@ function recoverAdministratorAccess_(spreadsheet, operator) {
       entityType: 'USER',
       entityId: administrator.id,
       status: 'SUCCESS',
-      details: { pepperReprovisioned: pepperWasMissing }
+      details: {
+        pepperReprovisioned: pepperWasMissing,
+        duplicateAdministratorsArchived: duplicateRepair.archived
+      }
     });
     return {
       recovered: true,
@@ -252,6 +259,7 @@ function recoverAdministratorAccess_(spreadsheet, operator) {
       temporaryPassword: temporaryPassword,
       forcePasswordChange: true,
       pepperReprovisioned: pepperWasMissing,
+      duplicateAdministratorsArchived: duplicateRepair.archived,
       warning: pepperWasMissing ? 'يجب إعادة تعيين كلمات مرور باقي المستخدمين من لوحة المدير.' : ''
     };
   });

@@ -462,6 +462,11 @@ const tests = [
       createdBy: 'SHEET_EDITOR'
     });
     assertWarehouseError(() => templateHarness.context.allUserRecords_(), 'USER_DATA_INVALID');
+    const duplicateRecovery = templateHarness.context.recoverAdministratorAccessFromSheet();
+    assert.equal(duplicateRecovery.recovered, true);
+    assert.equal(duplicateRecovery.duplicateAdministratorsArchived, 1);
+    assert.equal(templateHarness.context.allUserRecords_().filter((user) => user.username === 'admin').length, 1);
+    assertOk(templateHarness.context.login('admin', duplicateRecovery.temporaryPassword));
 
     const malformedHarness = createHarness();
     malformedHarness.properties.setProperty('WAREHOUSE_SPREADSHEET_ID', malformedHarness.spreadsheet.getId());

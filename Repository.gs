@@ -388,6 +388,41 @@ function allUserRecords_() {
   return users;
 }
 
+/**
+ * Owner-recovery helper for installations affected by the historical row
+ * reader bug that allowed setup to append more than one SYSTEM admin. The
+ * oldest identity is preserved so existing audit references remain useful;
+ * later duplicates are renamed and disabled, which also makes their existing
+ * username-bound password hashes unusable.
+ */
+function archiveDuplicateAdministratorRows_() {
+  var table = schemaTable_('USERS');
+  var administrators = table.rows.map(function (entry) {
+    return userFromTableRow_(table, entry);
+  }).filter(function (user) {
+    return user.id && user.username === 'admin';
+  }).sort(function (left, right) {
+    return left.rowNumber - right.rowNumber;
+  });
+
+  if (administrators.length <= 1) return { archived: 0, retainedId: administrators.length ? administrators[0].id : '' };
+  var retained = administrators[0];
+  for (var i = 1; i < administrators.length; i += 1) {
+    var duplicate = administrators[i];
+    updateMappedRow_('USERS', duplicate.rowNumber, {
+      username: 'archived_admin_' + duplicate.rowNumber,
+      role: 'AUDITOR',
+      active: false,
+      failedAttempts: 0,
+      lockedUntil: '',
+      sessionVersion: duplicate.sessionVersion + 1,
+      forcePasswordChange: true,
+      updatedAt: new Date()
+    });
+  }
+  return { archived: administrators.length - 1, retainedId: retained.id };
+}
+
 function findUserByNormalizedUsername_(username) {
   var normalized = normalizeUsername_(username);
   var users = allUserRecords_();
