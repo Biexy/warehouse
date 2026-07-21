@@ -288,12 +288,28 @@ function updateMappedRow_(schemaKey, rowNumber, valuesByKey) {
   if (rowNumber < 2 || rowNumber > table.sheet.getLastRow()) {
     throw new WarehouseError_('NOT_FOUND', 'السجل غير موجود.');
   }
-  var row = table.sheet.getRange(rowNumber, 1, 1, table.headers.values.length).getValues()[0];
+  var updates = [];
   Object.keys(valuesByKey).forEach(function (key) {
     var column = table.headers.byLabel[table.schema.columns[key]];
-    if (column) row[column - 1] = safeCellValue_(valuesByKey[key]);
+    if (column) updates.push({ column: column, value: safeCellValue_(valuesByKey[key]) });
   });
-  table.sheet.getRange(rowNumber, 1, 1, row.length).setValues([row]);
+  updates.sort(function (left, right) { return left.column - right.column; });
+
+  // Write only mapped cells. Rewriting the whole row would replace formulas in
+  // owner-added columns with their calculated values. Adjacent mapped cells
+  // are still batched so related fields such as a password salt/hash are
+  // written together in one Sheets operation.
+  var group = [];
+  updates.forEach(function (update, index) {
+    if (!group.length || update.column === group[group.length - 1].column + 1) {
+      group.push(update);
+    }
+    if (index === updates.length - 1 || updates[index + 1].column !== update.column + 1) {
+      table.sheet.getRange(rowNumber, group[0].column, 1, group.length)
+        .setValues([group.map(function (entry) { return entry.value; })]);
+      group = [];
+    }
+  });
 }
 
 /** Prefix spreadsheet formula leaders before every string write. */
@@ -315,7 +331,7 @@ function userFromTableRow_(table, entry) {
   return {
     rowNumber: entry.rowNumber,
     id: readCellText_(rowValue_(table, row, 'id')),
-    username: readCellText_(rowValue_(table, row, 'username')),
+    username: normalizeUsername_(readCellText_(rowValue_(table, row, 'username'))),
     displayName: readCellText_(rowValue_(table, row, 'displayName')),
     passwordSalt: readCellText_(rowValue_(table, row, 'passwordSalt')),
     passwordHash: readCellText_(rowValue_(table, row, 'passwordHash')),
@@ -336,13 +352,40 @@ function allUserRecords_() {
   var table = schemaTable_('USERS');
   // Ignore preformatted/template rows that contain defaults (for example a
   // session-version value or checkbox) but no actual user identity. A real
-  // user must have at least an ID or username; counting visual template rows
-  // as users prevents first-time initialization and pepper provisioning.
-  return table.rows.filter(function (entry) {
-    var id = readCellText_(rowValue_(table, entry, 'id'));
-    var username = readCellText_(rowValue_(table, entry, 'username'));
-    return !!(id || username);
-  }).map(function (entry) { return userFromTableRow_(table, entry); });
+  // user must have both an ID and username; partial identities fail closed.
+  var users = [];
+  var ids = {};
+  var usernames = {};
+  table.rows.forEach(function (entry) {
+    var id = readCellText_(rowValue_(table, entry.values, 'id'));
+    var rawUsername = readCellText_(rowValue_(table, entry.values, 'username'));
+    if (!id && !rawUsername) return;
+    if (!id || !rawUsername) {
+      throw new WarehouseError_('USER_DATA_INVALID', 'يوجد صف مستخدم غير مكتمل في ورقة المستخدمين.', { row: entry.rowNumber });
+    }
+
+    var username;
+    try {
+      username = validateUsername_(rawUsername);
+    } catch (ignored) {
+      throw new WarehouseError_('USER_DATA_INVALID', 'اسم مستخدم غير صالح في ورقة المستخدمين.', { row: entry.rowNumber });
+    }
+    if (ids[id]) {
+      throw new WarehouseError_('USER_DATA_INVALID', 'يوجد معرّف مستخدم مكرر في ورقة المستخدمين.', { row: entry.rowNumber });
+    }
+    if (usernames[username]) {
+      throw new WarehouseError_('USER_DATA_INVALID', 'يوجد اسم مستخدم مكرر في ورقة المستخدمين.', { row: entry.rowNumber });
+    }
+
+    var user = userFromTableRow_(table, entry);
+    if (!user.passwordSalt || !user.passwordHash || WAREHOUSE_ROLES_.indexOf(user.role) === -1) {
+      throw new WarehouseError_('USER_DATA_INVALID', 'بيانات الدخول أو الدور غير مكتملة في ورقة المستخدمين.', { row: entry.rowNumber });
+    }
+    ids[id] = true;
+    usernames[username] = true;
+    users.push(user);
+  });
+  return users;
 }
 
 function findUserByNormalizedUsername_(username) {

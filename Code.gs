@@ -68,6 +68,7 @@ function initializeWarehouseFromSheet() {
   if (!spreadsheet) {
     throw new WarehouseError_('SHEET_CONTEXT_REQUIRED', 'شغل التهيئة من قائمة «نظام المخزون» داخل Google Sheets.');
   }
+  requireSpreadsheetOwner_(spreadsheet);
   var properties = PropertiesService.getScriptProperties();
   var storedId = properties.getProperty('WAREHOUSE_SPREADSHEET_ID');
   if (storedId && storedId !== spreadsheet.getId()) {
@@ -86,9 +87,8 @@ function initializeWarehouseFromSheet() {
  * Private one-time setup. It is safe to run repeatedly.
  *
  * On the first run only, the Sheet dialog and returned object contain the
- * randomly generated temporary administrator password. Plaintext passwords
- * are never written to Sheets, Properties, Cache, logs, or another persistent
- * store.
+ * fixed first-install administrator password. Its hash is stored in Sheets;
+ * the user must replace it immediately through the mandatory password gate.
  */
 function setupSystem_(spreadsheet) {
   return withScriptLock_(function () {
@@ -102,6 +102,7 @@ function setupSystem_(spreadsheet) {
       );
     }
     if (!pepperExists) ensurePasswordPepper_();
+    ensureAuthEpoch_();
 
     // Keep schema/settings completion idempotent even when an admin exists.
     setSettingValue_('SCHEMA_VERSION', WAREHOUSE_CONFIG_.SCHEMA_VERSION, 'NUMBER', 'إصدار مخطط البيانات', 'SYSTEM');
@@ -176,6 +177,7 @@ function recoverAdministratorAccessFromSheet() {
   if (storedId && storedId !== spreadsheet.getId()) {
     throw new WarehouseError_('SPREADSHEET_MISMATCH', 'هذا ليس جدول النظام المهيأ.');
   }
+  var operator = requireSpreadsheetOwner_(spreadsheet);
   var ui = SpreadsheetApp.getUi();
   var choice = ui.alert(
     'استعادة دخول المدير',
@@ -184,7 +186,7 @@ function recoverAdministratorAccessFromSheet() {
   );
   if (choice !== ui.Button.YES) return { recovered: false, cancelled: true };
   properties.setProperty('WAREHOUSE_SPREADSHEET_ID', spreadsheet.getId());
-  var result = recoverAdministratorAccess_(spreadsheet);
+  var result = recoverAdministratorAccess_(spreadsheet, operator);
   var recoveryMessage = 'اسم المستخدم: ' + result.username + '\nكلمة المرور المؤقتة: ' + result.temporaryPassword + '\n\nانسخها الآن؛ لن تظهر مرة أخرى.';
   if (result.warning) recoveryMessage += '\n\nتنبيه: ' + result.warning;
   ui.alert(
@@ -195,8 +197,9 @@ function recoverAdministratorAccessFromSheet() {
   return result;
 }
 
-function recoverAdministratorAccess_(spreadsheet) {
+function recoverAdministratorAccess_(spreadsheet, operator) {
   return withScriptLock_(function () {
+    operator = operator || requireSpreadsheetOwner_(spreadsheet);
     setupRepository_(spreadsheet);
     var users = allUserRecords_();
     if (!users.length) {
@@ -205,12 +208,11 @@ function recoverAdministratorAccess_(spreadsheet) {
     var pepperWasMissing = !PropertiesService.getScriptProperties().getProperty(AUTH_CONFIG_.PEPPER_PROPERTY);
     if (pepperWasMissing) {
       ensurePasswordPepper_();
-      // Cached sessions do not depend on the password hash; invalidate every
-      // one when the server secret is re-provisioned.
-      users.forEach(function (user) {
-        updateUserFields_(user, { sessionVersion: user.sessionVersion + 1 });
-      });
-      users = allUserRecords_();
+      // A single durable epoch change invalidates every cached session, even
+      // if execution is interrupted immediately after the pepper is replaced.
+      incrementAuthEpoch_();
+    } else {
+      ensureAuthEpoch_();
     }
     var administrator = null;
     for (var i = 0; i < users.length; i += 1) {
@@ -223,7 +225,7 @@ function recoverAdministratorAccess_(spreadsheet) {
     }
     if (!administrator) throw new WarehouseError_('ADMIN_NOT_FOUND', 'لا يوجد حساب مدير لاستعادته.');
 
-    var temporaryPassword = INITIAL_ADMIN_PASSWORD_;
+    var temporaryPassword = generateTemporaryPassword_(administrator.username);
     var salt = generatePasswordSalt_();
     administrator = updateUserFields_(administrator, {
       passwordSalt: salt,
@@ -235,8 +237,9 @@ function recoverAdministratorAccess_(spreadsheet) {
       forcePasswordChange: true,
       sessionVersion: administrator.sessionVersion + 1
     });
+    clearRecoveryRateLimits_(administrator.username);
     appendAuditRecord_({
-      actor: { id: administrator.id, username: administrator.username, displayName: administrator.displayName },
+      actor: operator,
       action: 'ADMIN_RECOVERY',
       entityType: 'USER',
       entityId: administrator.id,
@@ -252,6 +255,27 @@ function recoverAdministratorAccess_(spreadsheet) {
       warning: pepperWasMissing ? 'يجب إعادة تعيين كلمات مرور باقي المستخدمين من لوحة المدير.' : ''
     };
   });
+}
+
+function requireSpreadsheetOwner_(spreadsheet) {
+  var effectiveEmail = '';
+  var ownerEmail = '';
+  try {
+    effectiveEmail = String(Session.getEffectiveUser().getEmail() || '').trim().toLowerCase();
+    var owner = DriveApp.getFileById(spreadsheet.getId()).getOwner();
+    ownerEmail = owner ? String(owner.getEmail() || '').trim().toLowerCase() : '';
+  } catch (ignored) {
+    effectiveEmail = '';
+    ownerEmail = '';
+  }
+  if (!effectiveEmail || !ownerEmail || effectiveEmail !== ownerEmail) {
+    throw new WarehouseError_('OWNER_REQUIRED', 'تهيئة النظام واستعادة المدير متاحتان لمالك ملف Google Sheets فقط.');
+  }
+  return {
+    id: 'GOOGLE:' + effectiveEmail,
+    username: effectiveEmail,
+    displayName: effectiveEmail
+  };
 }
 
 /** Execute a callable and convert all expected errors to a stable RPC shape. */

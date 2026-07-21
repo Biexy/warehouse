@@ -13,7 +13,8 @@ var AUTH_CONFIG_ = Object.freeze({
   RATE_LIMIT_WINDOW_SECONDS: 15 * 60,
   GLOBAL_RATE_LIMIT_ATTEMPTS: 120,
   GLOBAL_RATE_LIMIT_WINDOW_SECONDS: 60,
-  PEPPER_PROPERTY: 'WAREHOUSE_PASSWORD_PEPPER_V1'
+  PEPPER_PROPERTY: 'WAREHOUSE_PASSWORD_PEPPER_V1',
+  EPOCH_PROPERTY: 'WAREHOUSE_AUTH_EPOCH_V1'
 });
 
 var WAREHOUSE_ROLES_ = Object.freeze(['ADMIN', 'STOREKEEPER', 'AUDITOR']);
@@ -109,7 +110,7 @@ function saveUser(token, payload) {
     return withScriptLock_(function () {
       var session = requireSession_(token, ['ADMIN']);
       if (!payload.id) {
-        var temporaryPassword = generateTemporaryPassword_();
+        var temporaryPassword = generateTemporaryPassword_(payload.username);
         var created = createUserRecord_({
           username: payload.username,
           displayName: payload.displayName,
@@ -172,7 +173,7 @@ function resetUserPassword(token, payload) {
       var userId = payload.userId || payload.id;
       var user = findUserById_(requireText_(userId, 'معرف المستخدم', 100, false));
       if (!user) throw new WarehouseError_('USER_NOT_FOUND', 'المستخدم غير موجود.');
-      var temporaryPassword = generateTemporaryPassword_();
+      var temporaryPassword = generateTemporaryPassword_(user.username);
       var salt = generatePasswordSalt_();
       var updated = updateUserFields_(user, {
         passwordSalt: salt,
@@ -251,6 +252,9 @@ function authenticateInternal_(prepared) {
   var normalized = prepared.normalized;
   var user = findUserByNormalizedUsername_(normalized);
   var now = new Date();
+  var normalHashMatches = !!user && user.passwordSalt === prepared.observedSalt &&
+    constantTimeEqual_(prepared.candidateHash, user.passwordHash);
+  var lockIsActive = !!(user && user.lockedUntil && new Date(user.lockedUntil).getTime() > now.getTime());
 
   // One-time compatibility repair for an admin created before the fixed
   // first-login password was introduced. Strict predicates keep this from
@@ -258,6 +262,8 @@ function authenticateInternal_(prepared) {
   // lastLoginAt is populated, and the mandatory password change also clears
   // forcePasswordChange.
   var canRepairInitialAdmin = !!user &&
+    !normalHashMatches &&
+    !lockIsActive &&
     prepared.initialAdminPasswordMatch === true &&
     user.username === 'admin' &&
     user.role === 'ADMIN' &&
@@ -271,8 +277,6 @@ function authenticateInternal_(prepared) {
     user = updateUserFields_(user, {
       passwordSalt: repairedSalt,
       passwordHash: derivePasswordHash_(user.username, INITIAL_ADMIN_PASSWORD_, repairedSalt),
-      failedAttempts: 0,
-      lockedUntil: '',
       sessionVersion: user.sessionVersion + 1
     });
     appendAuditRecord_({
@@ -284,7 +288,8 @@ function authenticateInternal_(prepared) {
       details: {}
     });
     prepared.observedSalt = user.passwordSalt;
-    prepared.candidateHash = user.passwordHash;
+    prepared.candidateHash = derivePasswordHash_(user.username, INITIAL_ADMIN_PASSWORD_, user.passwordSalt);
+    normalHashMatches = true;
   }
 
   if (user && user.lockedUntil && new Date(user.lockedUntil).getTime() > now.getTime()) {
@@ -340,6 +345,7 @@ function issueSession_(user) {
   var session = {
     userId: user.id,
     sessionVersion: user.sessionVersion,
+    authEpoch: getAuthEpoch_(),
     issuedAt: issuedAt.toISOString(),
     expiresAt: expiresAt.toISOString()
   };
@@ -360,6 +366,10 @@ function requireSession_(token, allowedRoles, options) {
   if (!cached || !cached.userId || new Date(cached.expiresAt).getTime() <= Date.now()) {
     CacheService.getScriptCache().remove(cacheKey);
     throw new WarehouseError_('SESSION_EXPIRED', 'انتهت الجلسة. سجل الدخول مرة أخرى.');
+  }
+  if (Number(cached.authEpoch) !== getAuthEpoch_()) {
+    CacheService.getScriptCache().remove(cacheKey);
+    throw new WarehouseError_('SESSION_INVALIDATED', 'تم إلغاء الجلسة. سجل الدخول مرة أخرى.');
   }
   var user = findUserById_(cached.userId);
   if (!user || !user.active || user.sessionVersion !== Number(cached.sessionVersion)) {
@@ -422,6 +432,28 @@ function ensurePasswordPepper_() {
   return pepper;
 }
 
+function ensureAuthEpoch_() {
+  var properties = PropertiesService.getScriptProperties();
+  var raw = properties.getProperty(AUTH_CONFIG_.EPOCH_PROPERTY);
+  var epoch = Number(raw);
+  if (!isFinite(epoch) || epoch < 1 || Math.floor(epoch) !== epoch) {
+    epoch = 1;
+    properties.setProperty(AUTH_CONFIG_.EPOCH_PROPERTY, String(epoch));
+  }
+  return epoch;
+}
+
+function getAuthEpoch_() {
+  return ensureAuthEpoch_();
+}
+
+function incrementAuthEpoch_() {
+  var properties = PropertiesService.getScriptProperties();
+  var next = ensureAuthEpoch_() + 1;
+  properties.setProperty(AUTH_CONFIG_.EPOCH_PROPERTY, String(next));
+  return next;
+}
+
 function getPasswordPepper_() {
   var pepper = PropertiesService.getScriptProperties().getProperty(AUTH_CONFIG_.PEPPER_PROPERTY);
   if (!pepper) throw new WarehouseError_('SYSTEM_NOT_INITIALIZED', 'هيئ النظام من قائمة «نظام المخزون» داخل Google Sheets أولاً.');
@@ -432,9 +464,18 @@ function generatePasswordSalt_() {
   return randomMaterial_(3);
 }
 
-function generateTemporaryPassword_() {
-  // Explicit character classes plus >120 bits of UUID-derived random material.
-  return 'Z!7a' + randomMaterial_(2).replace(/[^A-Za-z0-9_-]/g, '').substring(0, 20);
+function generateTemporaryPassword_(username) {
+  // A base64url SHA-256 digest supplies mixed random material. Regenerate
+  // until the exact password policy passes, including the username exclusion.
+  for (var attempt = 0; attempt < 32; attempt += 1) {
+    var candidate = randomMaterial_(3).substring(0, 24) + '!';
+    try {
+      return validateStrongPassword_(candidate, username || '');
+    } catch (error) {
+      if (!error || error.code !== 'WEAK_PASSWORD') throw error;
+    }
+  }
+  throw new WarehouseError_('PASSWORD_GENERATION_FAILED', 'تعذر إنشاء كلمة مرور مؤقتة آمنة. أعد المحاولة.');
 }
 
 function randomMaterial_(uuidCount) {
@@ -498,6 +539,12 @@ function clearLoginRateLimit_(username) {
   var cache = CacheService.getScriptCache();
   cache.remove(loginRateKey_(username));
   decrementRateBucket_(cache, 'login-rate:global');
+}
+
+function clearRecoveryRateLimits_(username) {
+  var cache = CacheService.getScriptCache();
+  cache.remove(loginRateKey_(normalizeUsername_(username)));
+  cache.remove('login-rate:global');
 }
 
 function consumeRateBucket_(cache, key, limit, windowSeconds, message) {

@@ -1,6 +1,17 @@
 (function () {
   'use strict';
 
+  // Local preview only: `?mock=1&skipLogin=1` starts with a mock session.
+  // This file is never included by the deployed Apps Script application.
+  if (new URLSearchParams(window.location.search).get('skipLogin') === '1') {
+    try {
+      window.sessionStorage.setItem(
+        'warehouse-control.session-token.v1',
+        'wms_preview_token_1234567890123456789012345678901234567890'
+      );
+    } catch (ignored) { /* sessionStorage can be unavailable in private mode. */ }
+  }
+
   var items = [
     { id: 'ITM-1', code: 'PUMP-017', name: 'مضخة مياه صناعية', unit: 'قطعة', openingQuantity: 18, currentQuantity: 12, reorderLevel: 5, active: true, stockStatus: 'OK' },
     { id: 'ITM-2', code: 'VALVE-204', name: 'صمام تحكم نحاسي', unit: 'قطعة', openingQuantity: 9, currentQuantity: 3, reorderLevel: 4, active: true, stockStatus: 'LOW' },
