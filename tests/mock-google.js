@@ -173,6 +173,56 @@
     });
   }
 
+  function filterMovements(params) {
+    params = params || {};
+    var query = String(params.query || '').trim().toLocaleLowerCase('ar');
+    var type = String(params.type || '').toUpperCase();
+    return movements.filter(function (movement) {
+      if (type && movement.type !== type) return false;
+      if (params.itemId && movement.itemId !== params.itemId) return false;
+      if (params.dateFrom && movement.documentDate < params.dateFrom) return false;
+      if (params.dateTo && movement.documentDate > params.dateTo) return false;
+      var haystack = [movement.id, movement.itemCode, movement.itemName, movement.party, movement.reference, movement.notes].join(' ').toLocaleLowerCase('ar');
+      return !query || haystack.indexOf(query) !== -1;
+    });
+  }
+
+  function movementReport(filtered) {
+    var byUnitMap = Object.create(null);
+    var byItemMap = Object.create(null);
+    filtered.forEach(function (movement) {
+      var item = items.find(function (candidate) { return candidate.id === movement.itemId; });
+      var unit = item && item.unit || 'غير محدد';
+      var net = movement.type === 'IN' ? movement.quantity : movement.type === 'OUT' ? -movement.quantity : Number(movement.netChange) || 0;
+      if (!byUnitMap[unit]) byUnitMap[unit] = { unit: unit, incoming: 0, outgoing: 0, reversalNet: 0, net: 0, currentBalance: 0 };
+      if (!byItemMap[movement.itemId]) {
+        byItemMap[movement.itemId] = {
+          itemId: movement.itemId,
+          itemCode: movement.itemCode,
+          itemName: movement.itemName,
+          unit: unit,
+          incoming: 0,
+          outgoing: 0,
+          reversalNet: 0,
+          net: 0,
+          currentBalance: item ? item.currentQuantity : null
+        };
+        byUnitMap[unit].currentBalance += item ? item.currentQuantity : 0;
+      }
+      [byUnitMap[unit], byItemMap[movement.itemId]].forEach(function (bucket) {
+        if (movement.type === 'IN') bucket.incoming += movement.quantity;
+        if (movement.type === 'OUT') bucket.outgoing += movement.quantity;
+        if (movement.type === 'REVERSAL') bucket.reversalNet += net;
+        bucket.net += net;
+      });
+    });
+    return {
+      movementCount: filtered.length,
+      byUnit: Object.keys(byUnitMap).map(function (key) { return byUnitMap[key]; }),
+      byItem: Object.keys(byItemMap).map(function (key) { return byItemMap[key]; })
+    };
+  }
+
   function bootstrap() {
     return {
       user: users[0],
@@ -192,7 +242,12 @@
     if (method === 'getBootstrap') return bootstrap();
     if (method === 'getDashboard') return dashboard(payload.days);
     if (method === 'listItems') return paginate(filterItems(payload), payload, 'items');
-    if (method === 'listMovements') return paginate(movements, payload, 'movements');
+    if (method === 'listMovements') {
+      var filteredMovements = filterMovements(payload);
+      var movementResult = paginate(filteredMovements, payload, 'movements');
+      movementResult.summary = movementReport(filteredMovements);
+      return movementResult;
+    }
     if (method === 'listUsers') return paginate(users, payload, 'users');
     if (method === 'logout') return { loggedOut: true };
     if (method === 'saveMovement') return { movement: movements[0] };

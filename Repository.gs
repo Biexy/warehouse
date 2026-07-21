@@ -517,7 +517,11 @@ function itemFromTableRow_(table, entry) {
 
 function allItemRecords_() {
   var table = schemaTable_('ITEMS');
-  return table.rows.map(function (entry) { return itemFromTableRow_(table, entry); });
+  // Formatting/default template rows are not records. App-created inventory
+  // items always have a server-generated identity.
+  return table.rows.filter(function (entry) {
+    return !!readCellText_(rowValue_(table, entry.values, 'id'));
+  }).map(function (entry) { return itemFromTableRow_(table, entry); });
 }
 
 function findItemById_(id) {
@@ -573,7 +577,10 @@ function movementFromTableRow_(table, entry) {
 
 function allMovementRecords_() {
   var table = schemaTable_('MOVEMENTS');
-  return table.rows.map(function (entry) { return movementFromTableRow_(table, entry); });
+  // Ignore preformatted/template rows that contain defaults but no ledger ID.
+  return table.rows.filter(function (entry) {
+    return !!readCellText_(rowValue_(table, entry.values, 'id'));
+  }).map(function (entry) { return movementFromTableRow_(table, entry); });
 }
 
 function findMovementById_(id) {

@@ -55,6 +55,7 @@
       users: { page: 1, pageSize: PAGE_SIZE, total: 0, hasMore: false }
     },
     lastResponses: { items: null, movements: null, users: null },
+    movementReportParams: null,
     searchActions: [],
     searchIndex: -1,
     globalSearchTimer: 0,
@@ -90,6 +91,9 @@
       'stockOverview', 'urgentItems', 'recentMovements',
       'movementFilters', 'movementQuery', 'movementTypeFilter', 'movementItemFilter',
       'movementDateFrom', 'movementDateTo', 'movementsState', 'movementsTableBody',
+      'movementReportPanel', 'movementReportState', 'movementReportByUnit',
+      'movementReportItemsTable', 'movementReportItemsBody', 'exportMovementExcel',
+      'exportMovementPdf',
       'movementsPagination', 'movementsPrev', 'movementsNext', 'movementsPageText',
       'itemFilters', 'itemQuery', 'itemStatusFilter', 'itemsState', 'itemsTableBody',
       'itemsPagination', 'itemsPrev', 'itemsNext', 'itemsPageText', 'csvDataset',
@@ -152,6 +156,8 @@
     dom.exportCsvButton.addEventListener('click', exportCsv);
     dom.csvDataset.addEventListener('change', updateCsvScopeNote);
     dom.createBackupButton.addEventListener('click', createBackup);
+    dom.exportMovementExcel.addEventListener('click', exportMovementReportExcel);
+    dom.exportMovementPdf.addEventListener('click', exportMovementReportPdf);
 
     dom.dashboardRange.addEventListener('change', function (event) {
       if (!event.target.matches('input[name="dashboardDays"]')) return;
@@ -344,8 +350,12 @@
         showPasswordChangeGate();
         return;
       }
-      showInlineError(dom.loginError, error.message);
-      announce('تعذّر تسجيل الدخول. ' + error.message);
+      var loginMessage = error.message;
+      if (error.code === 'USER_DATA_INVALID' && String(credentials.username).toLowerCase() === 'admin' && /مكرر/.test(loginMessage)) {
+        loginMessage += ' افتح ملف Google Sheets كمالك، ثم اختر «نظام المخزون ← استعادة دخول المدير».';
+      }
+      showInlineError(dom.loginError, loginMessage);
+      announce('تعذّر تسجيل الدخول. ' + loginMessage);
       dom.loginPassword.focus();
     }).finally(function () { setLoading(dom.loginSubmit, false); });
   }
@@ -466,6 +476,7 @@
     state.users = [];
     state.loaded = { dashboard: false, items: false, movements: false, users: false };
     state.lastResponses = { items: null, movements: null, users: null };
+    state.movementReportParams = null;
     state.paging = {
       items: { page: 1, pageSize: PAGE_SIZE, total: 0, hasMore: false },
       movements: { page: 1, pageSize: PAGE_SIZE, total: 0, hasMore: false },
@@ -1138,6 +1149,7 @@
   }
 
   function loadMovements() {
+    var requestId = ++state.listRequestIds.movements;
     var params = {
       query: dom.movementQuery.value.trim(),
       type: dom.movementTypeFilter.value,
@@ -1147,22 +1159,140 @@
       page: state.paging.movements.page,
       pageSize: state.paging.movements.pageSize
     };
+    var selectedItemOption = dom.movementItemFilter.options[dom.movementItemFilter.selectedIndex];
+    var reportParams = {
+      query: params.query,
+      type: params.type,
+      itemId: params.itemId,
+      itemLabel: selectedItemOption ? selectedItemOption.textContent : 'كل الأصناف',
+      dateFrom: params.dateFrom,
+      dateTo: params.dateTo
+    };
     renderLoading(dom.movementsState);
+    renderMovementReportLoading();
     clearNode(dom.movementsTableBody);
     return rpc('listMovements', params).then(function (data) {
+      if (requestId !== state.listRequestIds.movements) return;
       var rows = normalizeCollection(data, 'movements');
       state.movements = rows;
       state.lastResponses.movements = data || {};
+      state.movementReportParams = reportParams;
       state.loaded.movements = true;
       applyPaging('movements', data || {}, rows.length);
       clearNode(dom.movementsState);
       renderMovementsTable(rows);
+      renderMovementReport(data && data.summary);
       updatePagination('movements');
       if (!rows.length) renderEmpty(dom.movementsState, 'movements', 'لا توجد حركات تطابق المرشحات الحالية.');
     }).catch(function (error) {
+      if (requestId !== state.listRequestIds.movements || error.code === 'STALE_RESPONSE') return;
       if (handlePossibleAuthError(error)) return;
+      renderMovementReportError(error && error.message);
       renderError(dom.movementsState, error.message, loadMovements);
     });
+  }
+
+  function renderMovementReportLoading() {
+    dom.movementReportPanel.setAttribute('aria-busy', 'true');
+    dom.movementReportPanel.setAttribute('data-state', 'loading');
+    dom.exportMovementExcel.disabled = true;
+    dom.exportMovementPdf.disabled = true;
+    clearNode(dom.movementReportState);
+    dom.movementReportState.appendChild(createText('p', 'state-inline', 'جارٍ حساب إجماليات كل الحركات المطابقة للمرشحات…'));
+    clearNode(dom.movementReportByUnit);
+    clearNode(dom.movementReportItemsBody);
+  }
+
+  function renderMovementReportError(message) {
+    dom.movementReportPanel.setAttribute('aria-busy', 'false');
+    dom.movementReportPanel.setAttribute('data-state', 'error');
+    dom.exportMovementExcel.disabled = true;
+    dom.exportMovementPdf.disabled = true;
+    clearNode(dom.movementReportState);
+    var copy = message || 'تعذّر حساب تقرير الحركات.';
+    dom.movementReportState.appendChild(createText('p', 'inline-alert inline-alert--error', copy));
+    clearNode(dom.movementReportByUnit);
+    clearNode(dom.movementReportItemsBody);
+  }
+
+  function movementReportSummary() {
+    var response = state.lastResponses.movements;
+    return response && response.summary && typeof response.summary === 'object' ? response.summary : null;
+  }
+
+  function renderMovementReport(summary) {
+    dom.movementReportPanel.setAttribute('aria-busy', 'false');
+    clearNode(dom.movementReportState);
+    clearNode(dom.movementReportByUnit);
+    clearNode(dom.movementReportItemsBody);
+
+    if (!summary || !Array.isArray(summary.byUnit) || !Array.isArray(summary.byItem)) {
+      dom.movementReportPanel.setAttribute('data-state', 'unavailable');
+      dom.exportMovementExcel.disabled = true;
+      dom.exportMovementPdf.disabled = true;
+      dom.movementReportState.appendChild(createText('p', 'inline-alert inline-alert--error', 'بيانات التقرير غير متاحة في نسخة الخادم الحالية. انشر أحدث نسخة من ملفات Apps Script ثم أعد المحاولة.'));
+      return;
+    }
+
+    var movementCount = Math.max(0, Number(summary.movementCount) || 0);
+    dom.movementReportPanel.setAttribute('data-state', movementCount ? 'ready' : 'empty');
+    dom.movementReportState.appendChild(createText(
+      'p',
+      'movement-report__scope',
+      movementCount
+        ? 'يشمل التقرير ' + formatNumber(movementCount) + ' حركة مطابقة لكل المرشحات، وليس الصفحة المعروضة فقط.'
+        : 'لا توجد حركات مطابقة للمرشحات الحالية.'
+    ));
+
+    summary.byUnit.forEach(function (unitRow) {
+      dom.movementReportByUnit.appendChild(createMovementUnitCard(unitRow));
+    });
+
+    summary.byItem.forEach(function (itemRow) {
+      var tr = document.createElement('tr');
+      addCell(tr, 'الصنف', itemRow.itemName || '—');
+      addCell(tr, 'الرمز', itemRow.itemCode || '—', { code: true });
+      addCell(tr, 'الوحدة', itemRow.unit || 'غير محددة');
+      addCell(tr, 'إجمالي الوارد', formatNumber(itemRow.incoming), { mono: true });
+      addCell(tr, 'إجمالي الصادر', formatNumber(itemRow.outgoing), { mono: true });
+      addCell(tr, 'أثر العكس', formatSignedNumber(itemRow.reversalNet), { mono: true });
+      addCell(tr, 'صافي الفترة', formatSignedNumber(itemRow.net), { mono: true });
+      addCell(tr, 'الرصيد الحالي', formatOptionalNumber(itemRow.currentBalance), { mono: true });
+      dom.movementReportItemsBody.appendChild(tr);
+    });
+
+    if (!summary.byUnit.length) {
+      dom.movementReportByUnit.appendChild(createText('p', 'muted', 'لا توجد وحدات لعرضها ضمن النطاق الحالي.'));
+    }
+    if (!summary.byItem.length) {
+      var emptyRow = document.createElement('tr');
+      var emptyCell = createText('td', 'table-empty-cell', 'لا توجد أصناف ضمن التقرير الحالي.');
+      emptyCell.colSpan = 8;
+      emptyRow.appendChild(emptyCell);
+      dom.movementReportItemsBody.appendChild(emptyRow);
+    }
+
+    dom.exportMovementExcel.disabled = !summary.byItem.length;
+    dom.exportMovementPdf.disabled = !summary.byItem.length;
+  }
+
+  function createMovementUnitCard(unitRow) {
+    var card = createElement('article', 'movement-report-unit');
+    card.appendChild(createText('h3', 'movement-report-unit__title', unitRow.unit || 'غير محددة'));
+    var list = createElement('dl', 'movement-report-unit__metrics');
+    [
+      ['إجمالي الوارد', formatNumber(unitRow.incoming), 'in'],
+      ['إجمالي الصادر', formatNumber(unitRow.outgoing), 'out'],
+      ['أثر العكس', formatSignedNumber(unitRow.reversalNet), 'reversal'],
+      ['صافي النطاق', formatSignedNumber(unitRow.net), 'net'],
+      ['الرصيد الحالي', formatOptionalNumber(unitRow.currentBalance), 'balance']
+    ].forEach(function (entry) {
+      var row = createElement('div', 'movement-report-unit__metric movement-report-unit__metric--' + entry[2]);
+      append(row, createText('dt', '', entry[0]), createText('dd', 'mono', entry[1]));
+      list.appendChild(row);
+    });
+    card.appendChild(list);
+    return card;
   }
 
   function renderMovementsTable(rows) {
@@ -1850,12 +1980,13 @@
     var reasonField = createField({ id: 'reverseReason', name: 'reason', label: 'سبب العكس', type: 'textarea', required: true, maxLength: 500 });
     form.appendChild(reasonField.wrap);
     var submit = addFormActions(form, 'إنشاء حركة العكس', 'button button--danger');
+    var clientRequestId = newClientRequestId();
     bindTouchedValidation(form);
     form.addEventListener('submit', function (event) {
       event.preventDefault();
       if (!validateForm(form)) return;
       setLoading(submit, true);
-      rpc('reverseMovement', { movementId: movement.id, reason: reasonField.input.value.trim() }).then(function () {
+      rpc('reverseMovement', { movementId: movement.id, reason: reasonField.input.value.trim(), clientRequestId: clientRequestId }).then(function () {
         dom.entityDialog.close();
         announce('تم إنشاء حركة العكس.');
         return refreshAfterInventoryMutation();
@@ -2126,6 +2257,217 @@
     document.body.removeChild(link);
     window.setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
     announce('بدأ تنزيل ملف CSV للصفحة المحمّلة حالياً، ويحتوي على ' + formatNumber(rows.length) + ' صفاً.');
+  }
+
+  function exportMovementReportExcel() {
+    var summary = movementReportSummary();
+    if (!summary || !Array.isArray(summary.byItem) || !summary.byItem.length) {
+      showToast('لا توجد بيانات للتصدير', 'طبّق المرشحات وانتظر اكتمال التقرير ثم حاول مرة أخرى.', 'error');
+      return;
+    }
+
+    var rows = [
+      ['تقرير إجماليات حركات المخزون'],
+      ['نطاق التقرير', 'كل الحركات المطابقة للمرشحات، وليس الصفحة المعروضة فقط'],
+      ['عدد الحركات المطابقة', Number(summary.movementCount) || 0],
+      ['تاريخ إنشاء التقرير', new Date().toISOString()]
+    ];
+    currentMovementReportFilters().forEach(function (entry) { rows.push(entry); });
+    rows.push([]);
+    rows.push(['الإجماليات حسب الوحدة']);
+    rows.push(['الوحدة', 'إجمالي الوارد', 'إجمالي الصادر', 'أثر العكس', 'صافي النطاق', 'الرصيد الحالي']);
+    summary.byUnit.forEach(function (unitRow) {
+      rows.push([
+        unitRow.unit || 'غير محددة',
+        numericExportValue(unitRow.incoming),
+        numericExportValue(unitRow.outgoing),
+        numericExportValue(unitRow.reversalNet),
+        numericExportValue(unitRow.net),
+        optionalNumericExportValue(unitRow.currentBalance)
+      ]);
+    });
+    rows.push([]);
+    rows.push(['الإجماليات والمتبقي حسب الصنف']);
+    rows.push(['رمز الصنف', 'اسم الصنف', 'الوحدة', 'إجمالي الوارد', 'إجمالي الصادر', 'أثر العكس', 'صافي النطاق', 'الرصيد الحالي']);
+    summary.byItem.forEach(function (itemRow) {
+      rows.push([
+        itemRow.itemCode || '',
+        itemRow.itemName || '',
+        itemRow.unit || 'غير محددة',
+        numericExportValue(itemRow.incoming),
+        numericExportValue(itemRow.outgoing),
+        numericExportValue(itemRow.reversalNet),
+        numericExportValue(itemRow.net),
+        optionalNumericExportValue(itemRow.currentBalance)
+      ]);
+    });
+
+    var lines = rows.map(function (row) { return row.map(csvCell).join(','); });
+    downloadBlob(
+      new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }),
+      'تقرير-حركات-المخزون-' + fileDateStamp() + '.csv'
+    );
+    showToast('بدأ تنزيل تقرير Excel', 'الملف بصيغة CSV متوافقة مع Excel ويشمل كل نتائج المرشحات.', 'success');
+    announce('بدأ تنزيل تقرير إجماليات الحركات المتوافق مع Excel.');
+  }
+
+  function exportMovementReportPdf() {
+    var summary = movementReportSummary();
+    if (!summary || !Array.isArray(summary.byItem) || !summary.byItem.length) {
+      showToast('لا توجد بيانات للطباعة', 'طبّق المرشحات وانتظر اكتمال التقرير ثم حاول مرة أخرى.', 'error');
+      return;
+    }
+
+    var reportWindow = window.open('', '_blank');
+    if (!reportWindow) {
+      showToast('تعذّر فتح تقرير PDF', 'اسمح بالنوافذ المنبثقة لهذا الموقع ثم أعد المحاولة.', 'error');
+      return;
+    }
+    try { reportWindow.opener = null; } catch (ignored) { /* Some browsers make opener read-only. */ }
+
+    var doc = reportWindow.document;
+    doc.documentElement.lang = 'ar';
+    doc.documentElement.dir = 'rtl';
+    doc.title = 'تقرير حركات المخزون';
+    clearNode(doc.head);
+    clearNode(doc.body);
+
+    var charset = doc.createElement('meta');
+    charset.setAttribute('charset', 'utf-8');
+    var viewport = doc.createElement('meta');
+    viewport.name = 'viewport';
+    viewport.content = 'width=device-width, initial-scale=1';
+    var style = doc.createElement('style');
+    style.textContent = [
+      '@page{size:A4 landscape;margin:12mm}',
+      '*{box-sizing:border-box}',
+      'body{font-family:Arial,"Noto Sans Arabic",sans-serif;color:#172033;background:#fff;margin:0;line-height:1.55}',
+      'main{max-width:100%;margin:0 auto}',
+      'h1{font-size:24px;margin:0 0 4px}',
+      'h2{font-size:17px;margin:22px 0 8px}',
+      'p{margin:3px 0;color:#4b5565}',
+      '.meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px 14px;margin:14px 0;padding:10px;border:1px solid #d8dee8;border-radius:8px}',
+      '.meta div{font-size:12px}.meta strong{display:block;color:#172033}',
+      'table{width:100%;border-collapse:collapse;font-size:11px;margin-top:6px}',
+      'th,td{border:1px solid #cfd6e1;padding:6px 7px;text-align:right;vertical-align:top}',
+      'th{background:#eaf8fc;color:#10283a;font-weight:700}',
+      'tbody tr:nth-child(even){background:#f7f9fc}',
+      '.number{font-variant-numeric:tabular-nums;direction:ltr;text-align:left}',
+      '.note{font-size:11px;color:#5c6678}',
+      '@media print{.print-note{display:none}thead{display:table-header-group}tr{break-inside:avoid}}'
+    ].join('');
+    append(doc.head, charset, viewport, style);
+
+    var main = doc.createElement('main');
+    main.appendChild(pdfText(doc, 'h1', 'تقرير إجماليات حركات المخزون'));
+    main.appendChild(pdfText(doc, 'p', 'يشمل كل الحركات المطابقة للمرشحات، وليس الصفحة المعروضة فقط.'));
+    main.appendChild(pdfText(doc, 'p', 'اختر «حفظ كملف PDF» من نافذة الطباعة.', 'print-note'));
+
+    var meta = doc.createElement('section');
+    meta.className = 'meta';
+    pdfMetaEntry(doc, meta, 'عدد الحركات المطابقة', formatNumber(summary.movementCount || 0));
+    pdfMetaEntry(doc, meta, 'وقت إنشاء التقرير', formatDate(new Date().toISOString(), true));
+    currentMovementReportFilters().forEach(function (entry) { pdfMetaEntry(doc, meta, entry[0], entry[1]); });
+    main.appendChild(meta);
+
+    main.appendChild(pdfText(doc, 'h2', 'الإجماليات حسب الوحدة'));
+    main.appendChild(buildPdfTable(doc,
+      ['الوحدة', 'إجمالي الوارد', 'إجمالي الصادر', 'أثر العكس', 'صافي النطاق', 'الرصيد الحالي'],
+      summary.byUnit.map(function (unitRow) {
+        return [unitRow.unit || 'غير محددة', unitRow.incoming, unitRow.outgoing, unitRow.reversalNet, unitRow.net, formatOptionalNumber(unitRow.currentBalance)];
+      }),
+      [1, 2, 3, 4, 5]
+    ));
+
+    main.appendChild(pdfText(doc, 'h2', 'الإجماليات والمتبقي حسب الصنف'));
+    main.appendChild(buildPdfTable(doc,
+      ['الرمز', 'الصنف', 'الوحدة', 'إجمالي الوارد', 'إجمالي الصادر', 'أثر العكس', 'صافي النطاق', 'الرصيد الحالي'],
+      summary.byItem.map(function (itemRow) {
+        return [itemRow.itemCode || '—', itemRow.itemName || '—', itemRow.unit || 'غير محددة', itemRow.incoming, itemRow.outgoing, itemRow.reversalNet, itemRow.net, formatOptionalNumber(itemRow.currentBalance)];
+      }),
+      [3, 4, 5, 6, 7]
+    ));
+    doc.body.appendChild(main);
+
+    window.setTimeout(function () {
+      reportWindow.focus();
+      reportWindow.print();
+    }, 250);
+    announce('فُتح تقرير الحركات للطباعة أو الحفظ بصيغة PDF.');
+  }
+
+  function currentMovementReportFilters() {
+    var typeLabels = { '': 'كل الأنواع', IN: 'إدخال', OUT: 'صرف', REVERSAL: 'عكس' };
+    var params = state.movementReportParams || {
+      query: dom.movementQuery.value.trim(),
+      type: dom.movementTypeFilter.value,
+      itemLabel: 'كل الأصناف',
+      dateFrom: dom.movementDateFrom.value,
+      dateTo: dom.movementDateTo.value
+    };
+    return [
+      ['نوع الحركة', typeLabels[params.type] || params.type],
+      ['الصنف', params.itemLabel || 'كل الأصناف'],
+      ['من تاريخ', params.dateFrom || 'غير محدد'],
+      ['إلى تاريخ', params.dateTo || 'غير محدد'],
+      ['البحث', params.query || 'بدون عبارة بحث']
+    ];
+  }
+
+  function numericExportValue(value) {
+    var number = Number(value);
+    return isFinite(number) ? number : 0;
+  }
+
+  function optionalNumericExportValue(value) {
+    if (value === null || value === undefined || value === '') return '';
+    return numericExportValue(value);
+  }
+
+  function downloadBlob(blob, fileName) {
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
+  function pdfText(doc, tag, text, className) {
+    var element = doc.createElement(tag);
+    if (className) element.className = className;
+    element.textContent = text === null || text === undefined ? '' : String(text);
+    return element;
+  }
+
+  function pdfMetaEntry(doc, container, label, value) {
+    var row = doc.createElement('div');
+    row.appendChild(pdfText(doc, 'strong', label));
+    row.appendChild(pdfText(doc, 'span', value));
+    container.appendChild(row);
+  }
+
+  function buildPdfTable(doc, headers, rows, numericColumns) {
+    var table = doc.createElement('table');
+    var head = doc.createElement('thead');
+    var headRow = doc.createElement('tr');
+    headers.forEach(function (header) { headRow.appendChild(pdfText(doc, 'th', header)); });
+    head.appendChild(headRow);
+    table.appendChild(head);
+    var body = doc.createElement('tbody');
+    rows.forEach(function (row) {
+      var tr = doc.createElement('tr');
+      row.forEach(function (value, index) {
+        var cell = pdfText(doc, 'td', numericColumns.indexOf(index) === -1 ? value : formatNumber(value));
+        if (numericColumns.indexOf(index) !== -1) cell.className = 'number';
+        tr.appendChild(cell);
+      });
+      body.appendChild(tr);
+    });
+    table.appendChild(body);
+    return table;
   }
 
   function updateCsvScopeNote() {
@@ -2683,6 +3025,17 @@
     if (!isFinite(number)) return '—';
     try { return new Intl.NumberFormat('ar', { maximumFractionDigits: 3 }).format(number); }
     catch (ignored) { return String(number); }
+  }
+
+  function formatOptionalNumber(value) {
+    if (value === null || value === undefined || value === '') return '—';
+    return formatNumber(value);
+  }
+
+  function formatSignedNumber(value) {
+    var number = Number(value);
+    if (!isFinite(number) || number === 0) return formatNumber(0);
+    return (number > 0 ? '+' : '−') + formatNumber(Math.abs(number));
   }
 
   function formatDate(value, includeTime) {

@@ -9,6 +9,14 @@ var DASHBOARD_CONFIG_ = Object.freeze({
   BOOTSTRAP_CATALOG_LIMIT: 50
 });
 
+// Six decimal places remain distinguishable throughout the supported range.
+// Keep both individual quantities and resulting balances within this bound.
+var QUANTITY_SCALE_ = 1000000;
+var MAX_QUANTITY_ = 1000000000;
+var QUANTITY_EPSILON_ = 1 / QUANTITY_SCALE_;
+var ITEM_LIST_STATUSES_ = ['ALL', 'ACTIVE', 'INACTIVE', 'LOW', 'OUT', 'AVAILABLE', 'OK'];
+var MOVEMENT_LIST_TYPES_ = ['ALL', 'IN', 'OUT', 'REVERSAL'];
+
 /**
  * getBootstrap(token) -> {user,permissions,dashboard,items,recentMovements,settings}
  * Forced-password sessions receive only the identity and permissions needed
@@ -92,7 +100,7 @@ function listItems(token, params) {
     params = params || {};
     var paging = clampPage_(params);
     var query = requireText_(params.query, 'البحث', 200, true).toLowerCase();
-    var status = String(params.status || 'ALL').toUpperCase();
+    var status = normalizeListEnum_(params.status, 'ALL', ITEM_LIST_STATUSES_, 'status', 'حالة الصنف');
     var data = inventorySnapshot_(DASHBOARD_CONFIG_.DEFAULT_DAYS);
     var items = data.items.map(function (item) {
       return publicItem_(item, data.balances[item.id] || 0, data.itemStats[item.id]);
@@ -126,13 +134,13 @@ function saveItem(token, payload) {
       var code = normalizeItemCode_(payload.code);
       var name = requireText_(payload.name, 'اسم الصنف', 160, false);
       var unit = requireText_(payload.unit, 'الوحدة', 40, false);
-      var reorderLevel = requireFiniteNumber_(payload.reorderLevel === undefined ? 0 : payload.reorderLevel, 'حد إعادة الطلب', 0, 1000000000000);
+      var reorderLevel = requireFiniteNumber_(payload.reorderLevel === undefined ? 0 : payload.reorderLevel, 'حد إعادة الطلب', 0, MAX_QUANTITY_);
       var duplicate = findItemByCode_(code);
       var now = new Date();
 
       if (!payload.id) {
         if (duplicate) throw new WarehouseError_('DUPLICATE_ITEM_CODE', 'رمز الصنف مستخدم مسبقاً.', { field: 'code' });
-        var openingQuantity = requireFiniteNumber_(payload.openingQuantity === undefined ? 0 : payload.openingQuantity, 'الرصيد الافتتاحي', 0, 1000000000000);
+        var openingQuantity = requireFiniteNumber_(payload.openingQuantity === undefined ? 0 : payload.openingQuantity, 'الرصيد الافتتاحي', 0, MAX_QUANTITY_);
         var created = appendItemRecord_({
           id: newId_('ITM'),
           code: code,
@@ -160,15 +168,21 @@ function saveItem(token, payload) {
       var item = findItemById_(requireText_(payload.id, 'معرف الصنف', 100, false));
       if (!item) throw new WarehouseError_('ITEM_NOT_FOUND', 'الصنف غير موجود.');
       if (duplicate && duplicate.id !== item.id) throw new WarehouseError_('DUPLICATE_ITEM_CODE', 'رمز الصنف مستخدم مسبقاً.', { field: 'code' });
-      if (payload.openingQuantity !== undefined && roundQuantity_(Number(payload.openingQuantity)) !== item.openingQuantity) {
-        throw new WarehouseError_('OPENING_BALANCE_IMMUTABLE', 'لا يمكن تعديل الرصيد الافتتاحي. سجل حركة مخزن للتصحيح.');
+      if (payload.openingQuantity !== undefined) {
+        var requestedOpeningQuantity = roundQuantity_(requireFiniteNumber_(payload.openingQuantity, 'الرصيد الافتتاحي', 0, MAX_QUANTITY_));
+        if (requestedOpeningQuantity !== item.openingQuantity) {
+          throw new WarehouseError_('OPENING_BALANCE_IMMUTABLE', 'لا يمكن تعديل الرصيد الافتتاحي. سجل حركة مخزن للتصحيح.');
+        }
       }
+      var nextActive = payload.active === undefined ? item.active : parseBoolean_(payload.active, item.active);
+      var itemMovements = allMovementRecords_();
+      validateItemLifecycleChange_(item, unit, nextActive, itemMovements);
       var updated = updateItemFields_(item, {
         code: code,
         name: name,
         unit: unit,
         reorderLevel: roundQuantity_(reorderLevel),
-        active: payload.active === undefined ? item.active : parseBoolean_(payload.active, item.active),
+        active: nextActive,
         updatedBy: session.user.username
       });
       var updatedSnapshot = inventorySnapshot_(DASHBOARD_CONFIG_.DEFAULT_DAYS);
@@ -195,12 +209,13 @@ function listMovements(token, params) {
     params = params || {};
     var paging = clampPage_(params);
     var query = requireText_(params.query, 'البحث', 200, true).toLowerCase();
-    var type = String(params.type || 'ALL').toUpperCase();
+    var type = normalizeListEnum_(params.type, 'ALL', MOVEMENT_LIST_TYPES_, 'type', 'نوع الحركة');
     var itemId = String(params.itemId || '');
     var dateFrom = params.dateFrom ? parseDocumentDate_(params.dateFrom, 'dateFrom') : null;
     var dateTo = params.dateTo ? parseDocumentDate_(params.dateTo, 'dateTo') : null;
     var fromKey = dateFrom ? documentDateKey_(dateFrom) : null;
     var toKey = dateTo ? documentDateKey_(dateTo) : null;
+    validateDocumentDateRange_(fromKey, toKey);
     var all = allMovementRecords_();
     var movements = all.filter(function (movement) {
       if (type !== 'ALL' && movement.type !== type) return false;
@@ -212,9 +227,11 @@ function listMovements(token, params) {
       return !query || haystack.indexOf(query) !== -1;
     }).sort(newestMovementFirst_);
     var total = movements.length;
+    var reportSummary = movementReportSummary_(movements, allItemRecords_(), all);
     var start = (paging.page - 1) * paging.pageSize;
     return {
       movements: publicMovements_(movements.slice(start, start + paging.pageSize), all),
+      summary: reportSummary,
       page: paging.page,
       pageSize: paging.pageSize,
       total: total,
@@ -233,13 +250,31 @@ function saveMovement(token, payload) {
     payload = requireObject_(payload, 'حركة المخزون');
     return withScriptLock_(function () {
       var session = requireSession_(token, ['ADMIN', 'STOREKEEPER']);
-      var clientRequestId = requireText_(payload.clientRequestId, 'معرف طلب العميل', 100, false);
-      if (!/^[A-Za-z0-9_-]{8,100}$/.test(clientRequestId)) {
-        throw new WarehouseError_('VALIDATION_ERROR', 'معرف طلب العميل غير صالح.', { field: 'clientRequestId' });
-      }
+      var clientRequestId = normalizeClientRequestId_(payload.clientRequestId, true);
+      var requestedItemId = requireText_(payload.itemId, 'الصنف', 100, false);
+      var type = normalizeMovementType_(payload.type);
+      var quantity = roundQuantity_(requireFiniteNumber_(payload.quantity, 'الكمية', QUANTITY_EPSILON_, MAX_QUANTITY_));
+      var party = requireText_(payload.party, 'الجهة المستفيدة أو الموردة', 200, false);
+      var documentDateText = requireText_(payload.documentDate, 'تاريخ المستند', 10, false);
+      var documentDate = parseDocumentDate_(documentDateText, 'documentDate');
+      assertDocumentDateNotFuture_(documentDate, 'documentDate');
+      var reference = requireText_(payload.reference, 'رقم المستند أو الفاتورة', 120, false);
+      var notes = requireText_(payload.notes, 'الملاحظات', 1000, true);
+      var normalizedRequest = {
+        itemId: requestedItemId,
+        type: type,
+        quantity: quantity,
+        party: party,
+        documentDate: documentDate,
+        reference: reference,
+        notes: notes
+      };
       var existingMovements = allMovementRecords_();
       for (var existingIndex = 0; existingIndex < existingMovements.length; existingIndex += 1) {
         if (existingMovements[existingIndex].clientRequestId === clientRequestId) {
+          if (!movementRequestMatches_(existingMovements[existingIndex], normalizedRequest, session.user.id)) {
+            throw new WarehouseError_('IDEMPOTENCY_KEY_CONFLICT', 'معرف طلب العميل مستخدم لعملية مختلفة.', { field: 'clientRequestId' });
+          }
           return {
             movement: publicMovements_([existingMovements[existingIndex]], existingMovements)[0],
             balancePreview: movementBalancePreview_(existingMovements[existingIndex]),
@@ -247,7 +282,6 @@ function saveMovement(token, payload) {
           };
         }
       }
-      var requestedItemId = requireText_(payload.itemId, 'الصنف', 100, false);
       var allItems = allItemRecords_();
       var item = null;
       for (var itemIndex = 0; itemIndex < allItems.length; itemIndex += 1) {
@@ -255,13 +289,6 @@ function saveMovement(token, payload) {
       }
       if (!item) throw new WarehouseError_('ITEM_NOT_FOUND', 'الصنف غير موجود.');
       if (!item.active) throw new WarehouseError_('ITEM_INACTIVE', 'لا يمكن تسجيل حركة لصنف معطل.');
-      var type = normalizeMovementType_(payload.type);
-      var quantity = roundQuantity_(requireFiniteNumber_(payload.quantity, 'الكمية', 0.000001, 1000000000000));
-      var party = requireText_(payload.party, 'الجهة المستفيدة أو الموردة', 200, false);
-      var documentDateText = requireText_(payload.documentDate, 'تاريخ المستند', 10, false);
-      var documentDate = parseDocumentDate_(documentDateText, 'documentDate');
-      var reference = requireText_(payload.reference, 'رقم المستند أو الفاتورة', 120, false);
-      var notes = requireText_(payload.notes, 'الملاحظات', 1000, true);
       var allMovements = existingMovements;
       var balances = calculateBalances_(allItems, allMovements);
       var before = roundQuantity_(balances[item.id] || 0);
@@ -283,6 +310,7 @@ function saveMovement(token, payload) {
           }, false)
         });
       }
+      assertBalanceWithinLimit_(after);
       var movement = appendMovementRecord_({
         id: newId_('MOV'),
         clientRequestId: clientRequestId,
@@ -317,7 +345,7 @@ function saveMovement(token, payload) {
   });
 }
 
-/** reverseMovement(token,{movementId,reason,documentDate?}) -> appended reversal. */
+/** reverseMovement(token,{movementId,reason,documentDate?,clientRequestId?}) -> appended reversal. */
 function reverseMovement(token, payload) {
   return apiResult_(function () {
     payload = requireObject_(payload, 'عكس الحركة');
@@ -325,15 +353,33 @@ function reverseMovement(token, payload) {
       var session = requireSession_(token, ['ADMIN', 'STOREKEEPER']);
       var movementId = requireText_(payload.movementId || payload.id, 'معرف الحركة', 100, false);
       var reason = requireText_(payload.reason, 'سبب العكس', 500, false);
+      var clientRequestId = normalizeClientRequestId_(payload.clientRequestId, false);
+      var reversalDocumentDate = payload.documentDate ? parseDocumentDate_(payload.documentDate, 'documentDate') : '';
+      if (reversalDocumentDate) assertDocumentDateNotFuture_(reversalDocumentDate, 'documentDate');
       var allMovements = allMovementRecords_();
       var original = null;
       for (var i = 0; i < allMovements.length; i += 1) if (allMovements[i].id === movementId) original = allMovements[i];
       if (!original) throw new WarehouseError_('MOVEMENT_NOT_FOUND', 'الحركة غير موجودة.');
       if (original.type === 'REVERSAL') throw new WarehouseError_('REVERSAL_NOT_REVERSIBLE', 'لا يمكن عكس حركة عكس.');
-      var alreadyReversed = allMovements.some(function (movement) {
-        return movement.type === 'REVERSAL' && movement.originalMovementId === original.id;
+      var requestIdMatch = null;
+      var existingReversal = null;
+      allMovements.forEach(function (movement) {
+        if (clientRequestId && movement.clientRequestId === clientRequestId) requestIdMatch = movement;
+        if (movement.type === 'REVERSAL' && movement.originalMovementId === original.id) existingReversal = movement;
       });
-      if (alreadyReversed) throw new WarehouseError_('ALREADY_REVERSED', 'تم عكس هذه الحركة مسبقاً.');
+      var reversalRequest = { originalMovementId: original.id, reason: reason, documentDate: reversalDocumentDate };
+      if (requestIdMatch) {
+        if (!reversalRequestMatches_(requestIdMatch, reversalRequest, session.user.id)) {
+          throw new WarehouseError_('IDEMPOTENCY_KEY_CONFLICT', 'معرف طلب العميل مستخدم لعملية مختلفة.', { field: 'clientRequestId' });
+        }
+        return reversalDeduplicatedResult_(requestIdMatch, original.id);
+      }
+      if (existingReversal) {
+        if (reversalRequestMatches_(existingReversal, reversalRequest, session.user.id)) {
+          return reversalDeduplicatedResult_(existingReversal, original.id);
+        }
+        throw new WarehouseError_('ALREADY_REVERSED', 'تم عكس هذه الحركة مسبقاً.');
+      }
 
       var items = allItemRecords_();
       var item = null;
@@ -346,15 +392,16 @@ function reverseMovement(token, payload) {
       if (after < -0.0000001) {
         throw new WarehouseError_('INSUFFICIENT_STOCK_FOR_REVERSAL', 'لا يمكن عكس التوريد لأن الكمية صرفت بعده.', { available: before, required: Math.abs(netChange) });
       }
+      assertBalanceWithinLimit_(after);
       var reversal = appendMovementRecord_({
         id: newId_('MOV'),
-        clientRequestId: '',
+        clientRequestId: clientRequestId,
         timestamp: new Date(),
-        documentDate: payload.documentDate ? parseDocumentDate_(payload.documentDate, 'documentDate') : '',
+        documentDate: reversalDocumentDate,
         type: 'REVERSAL',
         itemId: item.id,
-        itemCode: item.code,
-        itemName: item.name,
+        itemCode: original.itemCode || item.code,
+        itemName: original.itemName || item.name,
         quantity: original.quantity,
         netChange: netChange,
         balanceBefore: before,
@@ -375,7 +422,7 @@ function reverseMovement(token, payload) {
         status: 'SUCCESS',
         details: { originalMovementId: original.id, reason: reason, balanceAfter: after }
       });
-      return { movement: publicMovement_(reversal, false), balancePreview: movementBalancePreview_(reversal), originalMovementId: original.id };
+      return { movement: publicMovement_(reversal, false), balancePreview: movementBalancePreview_(reversal), originalMovementId: original.id, deduplicated: false };
     });
   });
 }
@@ -521,6 +568,91 @@ function calculateBalances_(items, movements) {
     }
   });
   return balances;
+}
+
+/**
+ * Summarize the complete filtered result set before pagination. Quantity
+ * fields exist only inside unit buckets (and their single-unit item rows), so
+ * unlike legacy KPIs the report never adds kilograms, pieces, boxes, etc.
+ */
+function movementReportSummary_(filteredMovements, items, allMovements) {
+  var itemById = Object.create(null);
+  items.forEach(function (item) { itemById[item.id] = item; });
+  var currentBalances = calculateBalances_(items, allMovements);
+  var unitBuckets = Object.create(null);
+  var itemBuckets = Object.create(null);
+
+  filteredMovements.forEach(function (movement) {
+    var item = itemById[movement.itemId] || null;
+    var unit = item && item.unit ? item.unit : 'غير محدد';
+    if (!unitBuckets[unit]) unitBuckets[unit] = newMovementSummaryBucket_(unit);
+    addMovementToSummaryBucket_(unitBuckets[unit], movement);
+
+    var itemKey = movement.itemId || ('__MOVEMENT__' + movement.id);
+    if (!itemBuckets[itemKey]) {
+      itemBuckets[itemKey] = {
+        itemId: movement.itemId || null,
+        itemCode: item ? item.code : movement.itemCode,
+        itemName: item ? item.name : movement.itemName,
+        unit: unit,
+        currentBalance: item && Object.prototype.hasOwnProperty.call(currentBalances, item.id) ? roundQuantity_(currentBalances[item.id]) : null,
+        incoming: 0,
+        outgoing: 0,
+        reversalNet: 0,
+        net: 0
+      };
+    }
+    addMovementToSummaryBucket_(itemBuckets[itemKey], movement);
+  });
+
+  var byItem = Object.keys(itemBuckets).map(function (key) {
+    return finalizeMovementSummaryBucket_(itemBuckets[key]);
+  }).sort(function (a, b) {
+    return a.unit.localeCompare(b.unit) || String(a.itemCode || '').localeCompare(String(b.itemCode || '')) || String(a.itemId || '').localeCompare(String(b.itemId || ''));
+  });
+  var currentByUnit = Object.create(null);
+  byItem.forEach(function (entry) {
+    if (!currentByUnit[entry.unit]) currentByUnit[entry.unit] = { value: 0, unavailable: false };
+    if (entry.currentBalance === null) currentByUnit[entry.unit].unavailable = true;
+    else currentByUnit[entry.unit].value += entry.currentBalance;
+  });
+  var byUnit = Object.keys(unitBuckets).sort(function (a, b) { return a.localeCompare(b); }).map(function (unit) {
+    var result = finalizeMovementSummaryBucket_(unitBuckets[unit]);
+    var current = currentByUnit[unit] || { value: 0, unavailable: false };
+    result.currentBalance = current.unavailable ? null : roundQuantity_(current.value);
+    return result;
+  });
+
+  return {
+    movementCount: filteredMovements.length,
+    byUnit: byUnit,
+    byItem: byItem
+  };
+}
+
+function newMovementSummaryBucket_(unit) {
+  return {
+    unit: unit,
+    incoming: 0,
+    outgoing: 0,
+    reversalNet: 0,
+    net: 0
+  };
+}
+
+function addMovementToSummaryBucket_(bucket, movement) {
+  bucket.net += movement.netChange;
+  if (movement.type === 'IN') bucket.incoming += movement.quantity;
+  if (movement.type === 'OUT') bucket.outgoing += movement.quantity;
+  if (movement.type === 'REVERSAL') bucket.reversalNet += movement.netChange;
+}
+
+function finalizeMovementSummaryBucket_(bucket) {
+  bucket.incoming = roundQuantity_(bucket.incoming);
+  bucket.outgoing = roundQuantity_(bucket.outgoing);
+  bucket.reversalNet = roundQuantity_(bucket.reversalNet);
+  bucket.net = roundQuantity_(bucket.net);
+  return bucket;
 }
 
 function dashboardFromSnapshot_(data) {
@@ -878,6 +1010,87 @@ function publicSettings_() {
   };
 }
 
+function normalizeListEnum_(value, defaultValue, allowedValues, field, label) {
+  var normalized = value === null || value === undefined || String(value).trim() === '' ? defaultValue : String(value).trim().toUpperCase();
+  if (allowedValues.indexOf(normalized) === -1) {
+    throw new WarehouseError_('VALIDATION_ERROR', 'قيمة ' + label + ' غير صالحة.', { field: field, allowed: allowedValues });
+  }
+  return normalized;
+}
+
+function validateDocumentDateRange_(fromKey, toKey) {
+  if (fromKey && toKey && fromKey > toKey) {
+    throw new WarehouseError_('VALIDATION_ERROR', 'تاريخ البداية يجب ألا يكون بعد تاريخ النهاية.', { field: 'dateRange' });
+  }
+}
+
+function normalizeClientRequestId_(value, required) {
+  var text = value === null || value === undefined ? '' : String(value).trim();
+  if (!text) {
+    if (required) throw new WarehouseError_('VALIDATION_ERROR', 'حقل معرف طلب العميل مطلوب.', { field: 'clientRequestId' });
+    return '';
+  }
+  if (!/^[A-Za-z0-9_-]{8,100}$/.test(text)) {
+    throw new WarehouseError_('VALIDATION_ERROR', 'معرف طلب العميل غير صالح.', { field: 'clientRequestId' });
+  }
+  return text;
+}
+
+function movementRequestMatches_(movement, request, actorId) {
+  return movement.type === request.type &&
+    movement.itemId === request.itemId &&
+    roundQuantity_(movement.quantity) === roundQuantity_(request.quantity) &&
+    documentDateKey_(movement.documentDate) === documentDateKey_(request.documentDate) &&
+    movement.party === request.party &&
+    movement.reference === request.reference &&
+    movement.notes === request.notes &&
+    movement.actorId === actorId;
+}
+
+function reversalRequestMatches_(movement, request, actorId) {
+  return movement.type === 'REVERSAL' &&
+    movement.originalMovementId === request.originalMovementId &&
+    movement.notes === request.reason &&
+    documentDateKey_(movement.documentDate) === documentDateKey_(request.documentDate) &&
+    movement.actorId === actorId;
+}
+
+function reversalDeduplicatedResult_(movement, originalMovementId) {
+  return {
+    movement: publicMovement_(movement, false),
+    balancePreview: movementBalancePreview_(movement),
+    originalMovementId: originalMovementId,
+    deduplicated: true
+  };
+}
+
+function validateItemLifecycleChange_(item, nextUnit, nextActive, movements) {
+  var relatedMovements = movements.filter(function (movement) { return movement.itemId === item.id; });
+  if (nextUnit !== item.unit && (roundQuantity_(item.openingQuantity) !== 0 || relatedMovements.length > 0)) {
+    throw new WarehouseError_('ITEM_UNIT_IMMUTABLE', 'لا يمكن تغيير وحدة صنف له رصيد افتتاحي أو حركات مخزون.', { field: 'unit' });
+  }
+  if (item.active && !nextActive) {
+    var currentBalance = calculateBalances_([item], relatedMovements)[item.id] || 0;
+    if (roundQuantity_(currentBalance) !== 0) {
+      throw new WarehouseError_('ITEM_HAS_STOCK', 'لا يمكن تعطيل صنف لديه رصيد حالي. صفّر الرصيد بحركة مخزون أولاً.', { currentBalance: roundQuantity_(currentBalance) });
+    }
+  }
+}
+
+function assertDocumentDateNotFuture_(date, fieldName) {
+  var dateKey = documentDateKey_(date);
+  var todayKey = Utilities.formatDate(new Date(), WAREHOUSE_CONFIG_.TIME_ZONE, 'yyyy-MM-dd');
+  if (dateKey > todayKey) {
+    throw new WarehouseError_('FUTURE_DOCUMENT_DATE', 'تاريخ المستند لا يمكن أن يكون في المستقبل.', { field: fieldName });
+  }
+}
+
+function assertBalanceWithinLimit_(balance) {
+  if (!isFinite(balance) || balance > MAX_QUANTITY_) {
+    throw new WarehouseError_('STOCK_LIMIT_EXCEEDED', 'الرصيد الناتج يتجاوز الحد العددي الآمن للنظام.', { maximum: MAX_QUANTITY_ });
+  }
+}
+
 function normalizeItemCode_(value) {
   var code = requireText_(value, 'رمز الصنف', 64, false).toUpperCase();
   try { code = code.normalize('NFKC'); } catch (ignored) { /* Supported by V8. */ }
@@ -921,6 +1134,8 @@ function newestMovementFirst_(a, b) {
 }
 
 function roundQuantity_(number) {
-  number = Number(number) || 0;
-  return Math.round((number + Number.EPSILON) * 1000000) / 1000000;
+  number = Number(number);
+  if (!isFinite(number)) return 0;
+  var rounded = Math.round(number * QUANTITY_SCALE_) / QUANTITY_SCALE_;
+  return rounded === 0 ? 0 : rounded;
 }

@@ -213,6 +213,68 @@
             <button class="button button--secondary filter-submit" type="submit"><svg class="icon"><use href="#icon-filter"></use></svg><span>تطبيق</span></button>
             <button class="button button--ghost filter-reset" type="reset">مسح</button>
           </form>
+          <article id="movementReportPanel" class="movement-report panel" aria-labelledby="movementReportTitle" aria-describedby="movementReportDescription" aria-busy="false" data-state="empty">
+            <header class="movement-report__header">
+              <div class="movement-report__heading">
+                <p class="eyebrow">حسب المرشحات المطبّقة</p>
+                <h2 id="movementReportTitle">تقرير إجماليات الحركات والرصيد المتبقي</h2>
+                <p id="movementReportDescription" class="muted">يعرض التقرير كامل النتائج المطابقة للمرشحات، ويجمع الكميات داخل كل وحدة قياس بصورة مستقلة.</p>
+              </div>
+              <div class="movement-report__actions" aria-label="تصدير تقرير الحركات">
+                <button id="exportMovementExcel" class="button button--secondary" type="button" disabled>
+                  <svg class="icon" aria-hidden="true"><use href="#icon-download"></use></svg>
+                  <span>Excel (CSV)</span>
+                </button>
+                <button id="exportMovementPdf" class="button button--secondary" type="button" disabled>
+                  <svg class="icon" aria-hidden="true"><use href="#icon-report"></use></svg>
+                  <span>تصدير إلى PDF</span>
+                </button>
+              </div>
+            </header>
+
+            <div id="movementReportState" class="movement-report__state" role="status" aria-live="polite" aria-atomic="true">
+              طبّق المرشحات لعرض إجماليات الوارد والصادر والعكس والرصيد المتبقي.
+            </div>
+
+            <section class="movement-report__section" aria-labelledby="movementReportUnitsTitle">
+              <div class="movement-report__section-heading">
+                <div>
+                  <h3 id="movementReportUnitsTitle">الإجماليات حسب الوحدة</h3>
+                  <p class="muted">لا تُجمع القطع والكيلوغرامات والصناديق في رقم واحد.</p>
+                </div>
+              </div>
+              <div id="movementReportByUnit" class="movement-report__units" aria-live="polite" data-state="empty">
+                <p class="movement-report__placeholder">لا توجد إجماليات لعرضها بعد.</p>
+              </div>
+            </section>
+
+            <section class="movement-report__section movement-report__section--items" aria-labelledby="movementReportItemsTitle">
+              <div class="movement-report__section-heading">
+                <div>
+                  <h3 id="movementReportItemsTitle">الإجماليات والرصيد حسب الصنف</h3>
+                  <p class="muted">صافي الحركة يساوي الوارد ناقص الصادر مع احتساب أثر حركات العكس.</p>
+                </div>
+              </div>
+              <div id="movementReportItemsTable" class="table-frame table-frame--embedded movement-report__table-frame">
+                <table aria-describedby="movementReportDescription">
+                  <caption class="sr-only">إجماليات الحركات والرصيد الحالي لكل صنف ضمن المرشحات المطبّقة</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">الصنف</th>
+                      <th scope="col">الرمز</th>
+                      <th scope="col">الوحدة</th>
+                      <th scope="col">الوارد</th>
+                      <th scope="col">الصادر</th>
+                      <th scope="col">أثر العكس</th>
+                      <th scope="col">صافي الحركة</th>
+                      <th scope="col">الرصيد الحالي</th>
+                    </tr>
+                  </thead>
+                  <tbody id="movementReportItemsBody"></tbody>
+                </table>
+              </div>
+            </section>
+          </article>
           <div id="movementsState" class="section-state" role="status" aria-live="polite"></div>
           <div class="table-frame">
             <table>

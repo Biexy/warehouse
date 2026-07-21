@@ -483,6 +483,86 @@
   .field--compact input, .field--compact select { min-height: 2.75rem; padding-block: var(--space-2xs); }
   .filter-submit, .filter-reset { flex: 0 0 auto; }
 
+  .movement-report {
+    display: grid;
+    gap: 0;
+    margin-block-end: var(--space-sm);
+    overflow: hidden;
+    padding: 0;
+  }
+  .movement-report__header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-md);
+    padding: var(--space-md);
+  }
+  .movement-report__heading { min-width: 0; display: grid; gap: var(--space-3xs); }
+  .movement-report__heading h2 { max-width: 34ch; }
+  .movement-report__heading .muted { max-width: 68ch; font-size: var(--text-sm); }
+  .movement-report__actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-xs); }
+  .movement-report__state {
+    min-height: 3rem;
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    margin: 0 var(--space-md) var(--space-md);
+    border: var(--rule-hair) solid var(--color-rule-2);
+    border-radius: var(--radius-input);
+    background: color-mix(in oklch, var(--color-accent) 5%, var(--color-paper-3));
+    padding: var(--space-2xs) var(--space-sm);
+    color: var(--color-muted);
+    font-size: var(--text-sm);
+  }
+  .movement-report__state:empty { display: none; }
+  .movement-report[data-state="loading"] .movement-report__state::before {
+    content: "";
+    width: var(--space-sm);
+    height: var(--space-sm);
+    flex: 0 0 var(--space-sm);
+    border: var(--rule-fine) solid var(--color-rule);
+    border-block-start-color: var(--color-accent);
+    border-radius: var(--radius-pill);
+    animation: spin .7s linear infinite;
+  }
+  .movement-report__section { border-block-start: var(--rule-hair) solid var(--color-rule-2); padding: var(--space-md); }
+  .movement-report__section--items { padding: 0; }
+  .movement-report__section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-sm); margin-block-end: var(--space-sm); }
+  .movement-report__section-heading > div { min-width: 0; display: grid; gap: var(--space-3xs); }
+  .movement-report__section-heading h3 { font-size: var(--text-md); }
+  .movement-report__section-heading .muted { font-size: var(--text-xs); }
+  .movement-report__section--items > .movement-report__section-heading { margin: 0; padding: var(--space-md); }
+  .movement-report__units { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: var(--space-xs); }
+  .movement-report__placeholder {
+    grid-column: 1 / -1;
+    min-height: 5rem;
+    display: grid;
+    place-items: center;
+    border: var(--rule-hair) dashed var(--color-rule);
+    border-radius: var(--radius-input);
+    padding: var(--space-sm);
+    color: var(--color-muted);
+    text-align: center;
+  }
+  .movement-report-unit { min-width: 0; border: var(--rule-hair) solid var(--color-rule-2); border-radius: var(--radius-input); background: var(--color-paper-3); padding: var(--space-sm); }
+  .movement-report-unit__title { margin-block-end: var(--space-xs); font-size: var(--text-base); }
+  .movement-report-unit__metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-xs); margin: 0; }
+  .movement-report-unit__metric { min-width: 0; display: grid; gap: var(--space-3xs); border-block-start: var(--rule-hair) solid var(--color-rule-2); padding-block-start: var(--space-2xs); }
+  .movement-report-unit__metric dt { color: var(--color-muted); font-size: var(--text-xs); }
+  .movement-report-unit__metric dd { margin: 0; overflow-wrap: anywhere; color: var(--color-ink); font-size: var(--text-md); font-variant-numeric: tabular-nums; }
+  .movement-report-unit__metric--in dd { color: var(--color-success); }
+  .movement-report-unit__metric--out dd { color: var(--color-danger); }
+  .movement-report-unit__metric--reversal dd { color: var(--color-muted); }
+  .movement-report-unit__metric--net dd { color: var(--color-accent); }
+  .movement-report-unit__metric--balance { grid-column: 1 / -1; }
+  .movement-report__units > .muted { grid-column: 1 / -1; min-height: 5rem; display: grid; place-items: center; text-align: center; }
+  .movement-report__scope { color: var(--color-ink-2); }
+  .movement-report__table-frame { border-block-start: var(--rule-hair) solid var(--color-rule-2); }
+  .movement-report__table-frame table { min-width: 58rem; }
+  .movement-report__table-frame td:nth-child(n + 4) { direction: ltr; unicode-bidi: isolate; font-variant-numeric: tabular-nums; }
+  .report-item-name { min-width: 0; display: grid; }
+  .report-item-name > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
   .table-frame { width: 100%; overflow-x: auto; }
   .table-frame--embedded { border: 0; border-radius: 0; background: transparent; }
   table { width: 100%; border-collapse: collapse; border-spacing: 0; }
@@ -711,6 +791,14 @@
     .filter-bar { display: grid; grid-template-columns: 1fr 1fr; }
     .filter-bar .field, .filter-bar .field--grow { grid-column: 1 / -1; }
     .filter-submit, .filter-reset { width: 100%; }
+    .movement-report__header { flex-direction: column; padding: var(--space-sm); }
+    .movement-report__actions { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .movement-report__actions .button { width: 100%; }
+    .movement-report__state { margin: 0 var(--space-sm) var(--space-sm); }
+    .movement-report__section { padding: var(--space-sm); }
+    .movement-report__section--items { padding: 0; }
+    .movement-report__section--items > .movement-report__section-heading { padding: var(--space-sm); }
+    .movement-report__table-frame table { min-width: 0; }
     .form-grid { grid-template-columns: 1fr; }
     .form-grid .field--full { grid-column: auto; }
     .dialog-actions { display: grid; grid-template-columns: 1fr; }
@@ -754,6 +842,9 @@
     .movement-context__facts { grid-template-columns: 1fr; }
     .balance-preview { gap: var(--space-2xs); }
     .balance-preview__operator { min-width: 3.5rem; padding-inline: var(--space-2xs); }
+    .movement-report__actions { grid-template-columns: 1fr; }
+    .movement-report-unit__metrics { grid-template-columns: 1fr; }
+    .movement-report-unit__metric--balance { grid-column: auto; }
   }
 
   @media (max-width: 22rem) {
@@ -771,6 +862,6 @@
 
   @media (forced-colors: active) {
     .status-shape { forced-color-adjust: none; }
-    .button, input, select, textarea, .panel, .table-frame, .metric-card, .range-control, .movement-type-choice__surface, .combobox-listbox, .combobox-option, .movement-context, .export-scope-note { border-color: currentColor; }
+    .button, input, select, textarea, .panel, .table-frame, .metric-card, .range-control, .movement-type-choice__surface, .combobox-listbox, .combobox-option, .movement-context, .export-scope-note, .movement-report-unit, .movement-report__state, .movement-report__placeholder { border-color: currentColor; }
   }
 </style>
