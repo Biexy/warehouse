@@ -352,6 +352,18 @@ const tests = [
     assert.equal(harness.spreadsheet.sheets.size, 0);
   }],
 
+  ['only the spreadsheet owner can recover administrator access', () => {
+    const harness = createHarness();
+    initialize(harness);
+    const before = harness.context.findUserByNormalizedUsername_('admin');
+    harness.identity.effectiveEmail = 'spreadsheet-editor@example.com';
+    assertWarehouseError(() => harness.context.recoverAdministratorAccessFromSheet(), 'OWNER_REQUIRED');
+    const after = harness.context.findUserByNormalizedUsername_('admin');
+    assert.equal(after.passwordSalt, before.passwordSalt);
+    assert.equal(after.passwordHash, before.passwordHash);
+    assert.equal(after.sessionVersion, before.sessionVersion);
+  }],
+
   ['fresh setup starts with login and forces a password change', () => {
     const harness = createHarness();
     const setup = initialize(harness);
@@ -375,6 +387,17 @@ const tests = [
 
     const currentLogin = assertOk(harness.context.authenticate({ username: 'admin', password: 'N3w!Secure#Warehouse' }));
     assert.equal(currentLogin.user.forcePasswordChange, false);
+  }],
+
+  ['random administrator recovery invalidates the public setup password', () => {
+    const harness = createHarness();
+    const setup = initialize(harness);
+    const recovery = harness.context.recoverAdministratorAccessFromSheet();
+    assert.equal(recovery.recovered, true);
+    assert.notEqual(recovery.temporaryPassword, setup.temporaryPassword);
+    assertRpcError(harness.context.login('admin', setup.temporaryPassword), 'INVALID_CREDENTIALS');
+    const recoveredLogin = assertOk(harness.context.login('admin', recovery.temporaryPassword));
+    assert.equal(recoveredLogin.user.forcePasswordChange, true);
   }],
 
   ['password change invalidates other sessions, and logout removes its session', () => {
@@ -421,6 +444,85 @@ const tests = [
 
     const recoveredLogin = assertOk(harness.context.login('admin', recovery.temporaryPassword), 'recovery must clear the username throttle');
     assert.equal(recoveredLogin.user.forcePasswordChange, true);
+  }],
+
+  ['administrator password reset clears the target username rate throttle', () => {
+    const { harness, password } = installAndSetPassword();
+    const administrator = assertOk(harness.context.login('admin', password));
+    const created = assertOk(harness.context.saveUser(administrator.token, {
+      username: 'storekeeper',
+      displayName: 'Storekeeper',
+      role: 'STOREKEEPER',
+      active: true
+    }));
+    const rateKey = harness.context.loginRateKey_('storekeeper');
+    harness.cache.put(rateKey, JSON.stringify({
+      count: harness.context.AUTH_CONFIG_.RATE_LIMIT_ATTEMPTS,
+      startedAt: Date.now()
+    }), harness.context.AUTH_CONFIG_.RATE_LIMIT_WINDOW_SECONDS);
+    assertRpcError(harness.context.login('storekeeper', created.temporaryPassword), 'RATE_LIMITED');
+
+    const reset = assertOk(harness.context.resetUserPassword(administrator.token, { userId: created.user.id }));
+    assert.equal(harness.cache.get(rateKey), null);
+    const recoveredLogin = assertOk(harness.context.login('storekeeper', reset.temporaryPassword));
+    assert.equal(recoveredLogin.user.forcePasswordChange, true);
+  }],
+
+  ['credential mutation preflights the audit schema before changing a password', () => {
+    const { harness, password } = installAndSetPassword();
+    const administrator = assertOk(harness.context.login('admin', password));
+    const created = assertOk(harness.context.saveUser(administrator.token, {
+      username: 'audited-user',
+      displayName: 'Audited user',
+      role: 'AUDITOR',
+      active: true
+    }));
+    const before = harness.context.findUserById_(created.user.id);
+    const auditSchema = harness.context.REPOSITORY_SCHEMA_.AUDIT;
+    const auditSheet = harness.spreadsheet.getSheetByName(auditSchema.name);
+    const actionHeader = auditSchema.columns.action;
+    let actionColumn = 0;
+    for (let column = 1; column <= auditSheet.getLastColumn(); column += 1) {
+      if (auditSheet.valueAt(1, column) === actionHeader) actionColumn = column;
+    }
+    assert.ok(actionColumn > 0);
+    auditSheet.setValueAt(1, actionColumn, '');
+
+    assertRpcError(harness.context.resetUserPassword(administrator.token, { userId: created.user.id }), 'SCHEMA_MISMATCH');
+    const after = harness.context.findUserById_(created.user.id);
+    assert.equal(after.passwordSalt, before.passwordSalt);
+    assert.equal(after.passwordHash, before.passwordHash);
+    assertOk(harness.context.login('audited-user', created.temporaryPassword));
+  }],
+
+  ['post-commit audit failure returns success, preserves the password, and queues replay', () => {
+    const { harness, password } = installAndSetPassword();
+    const administrator = assertOk(harness.context.login('admin', password));
+    const created = assertOk(harness.context.saveUser(administrator.token, {
+      username: 'outbox-user',
+      displayName: 'Outbox user',
+      role: 'STOREKEEPER',
+      active: true
+    }));
+    const originalAppendAudit = harness.context.appendAuditRecord_;
+    let failOnce = true;
+    harness.context.appendAuditRecord_ = (input) => {
+      if (failOnce) {
+        failOnce = false;
+        throw new Error('forced transient audit failure');
+      }
+      return originalAppendAudit(input);
+    };
+
+    const reset = assertOk(harness.context.resetUserPassword(administrator.token, { userId: created.user.id }));
+    assert.equal(reset.auditWarning.code, 'AUDIT_DEFERRED');
+    assert.equal(reset.auditWarning.queued, true);
+    assert.ok(harness.properties.getProperty(harness.context.AUTH_AUDIT_OUTBOX_PROPERTY_));
+    harness.context.appendAuditRecord_ = originalAppendAudit;
+
+    const recoveredLogin = assertOk(harness.context.login('outbox-user', reset.temporaryPassword));
+    assert.equal(recoveredLogin.user.forcePasswordChange, true);
+    assert.equal(harness.properties.getProperty(harness.context.AUTH_AUDIT_OUTBOX_PROPERTY_), null);
   }],
 
   ['template rows are ignored, malformed identity rows fail closed, and duplicate creation is rejected', () => {

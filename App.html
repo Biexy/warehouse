@@ -39,6 +39,8 @@
     dashboardLoadedDays: 0,
     dashboardRequestId: 0,
     dashboardLoading: false,
+    sessionGeneration: 0,
+    listRequestIds: { items: 0, movements: 0, users: 0 },
     catalogItems: [],
     itemCatalog: { total: 0, activeTotal: 0, returned: 0, truncated: false },
     items: [],
@@ -58,6 +60,8 @@
     globalSearchTimer: 0,
     globalSearchRequestId: 0,
     dialogReturnFocus: null,
+    dialogOperationId: 0,
+    dialogPending: false,
     credentials: null,
     loginUsername: ''
   };
@@ -71,7 +75,7 @@
     bindTouchedValidation(dom.loginForm);
     bindTouchedValidation(dom.passwordChangeForm, passwordValidators());
     showLogin();
-    state.token = readStoredToken();
+    storeToken(readStoredToken());
     if (state.token) resumeSession();
   }
 
@@ -127,8 +131,11 @@
       if (!event.target.closest('#globalSearch')) closeSearchResults();
     });
 
-    dom.entityDialogClose.addEventListener('click', function () { dom.entityDialog.close(); });
+    dom.entityDialogClose.addEventListener('click', requestEntityDialogClose);
     dom.entityDialog.addEventListener('click', closeDialogFromBackdrop);
+    dom.entityDialog.addEventListener('cancel', function (event) {
+      if (state.dialogPending) event.preventDefault();
+    });
     dom.entityDialog.addEventListener('close', restoreDialogFocus);
     dom.credentialsDialog.addEventListener('close', function () {
       state.credentials = null;
@@ -151,7 +158,6 @@
       var days = Number(event.target.value);
       if ([7, 30, 90].indexOf(days) === -1 || days === state.dashboardDays) return;
       state.dashboardDays = days;
-      state.dashboardLoadedDays = 0;
       loadDashboard(true);
     });
 
@@ -207,7 +213,9 @@
   }
 
   function storeToken(token) {
-    state.token = String(token || '');
+    var nextToken = String(token || '');
+    if (nextToken !== state.token) state.sessionGeneration += 1;
+    state.token = nextToken;
     try {
       if (state.token) window.sessionStorage.setItem(SESSION_KEY, state.token);
       else window.sessionStorage.removeItem(SESSION_KEY);
@@ -220,7 +228,19 @@
 
   function rpc(method, payload) {
     if (!state.token) return Promise.reject(appError('AUTH_REQUIRED', 'انتهت جلسة الدخول. سجّل الدخول من جديد.'));
-    return runRpc(method, [state.token, payload || {}]);
+    var token = state.token;
+    var generation = state.sessionGeneration;
+    return runRpc(method, [token, payload || {}]).then(function (data) {
+      if (generation !== state.sessionGeneration || token !== state.token) {
+        throw appError('STALE_RESPONSE', 'تم تجاهل استجابة من جلسة سابقة.');
+      }
+      return data;
+    }).catch(function (error) {
+      if (generation !== state.sessionGeneration || token !== state.token) {
+        throw appError('STALE_RESPONSE', 'تم تجاهل استجابة من جلسة سابقة.');
+      }
+      throw error;
+    });
   }
 
   function runRpc(method, args) {
@@ -279,10 +299,13 @@
     }).catch(function (error) {
       if (error.code === 'PASSWORD_CHANGE_REQUIRED') {
         showPasswordChangeGate();
-      } else {
+      } else if (AUTH_ERROR_CODES[error.code]) {
         clearSession();
         showLogin();
         if (error.code !== 'AUTH_REQUIRED') showInlineError(dom.loginError, error.message);
+      } else {
+        showLogin();
+        showInlineError(dom.loginError, (error.message || 'تعذّر الاتصال بالخادم.') + ' لم تُلغَ جلستك؛ أعد المحاولة.');
       }
     }).finally(function () { setLoading(dom.loginSubmit, false); });
   }
@@ -391,17 +414,16 @@
       showToast('تم تغيير كلمة المرور', 'سجّل الدخول الآن بكلمة المرور الجديدة.', 'success');
       dom.loginPassword.focus();
     }).catch(function (error) {
+      if (handlePossibleAuthError(error)) return;
       var message = error && error.message ? error.message : 'تعذّر تغيير كلمة المرور.';
-      return rpc('logout', {}).catch(function () {
-        /* Local session destruction still completes if server logout is unreachable. */
-      }).finally(function () {
-        clearSession();
-        if (dom.passwordChangeDialog.open) dom.passwordChangeDialog.close();
-        showLogin();
-        showInlineError(dom.loginError, message + ' سجّل الدخول وحاول مرة أخرى.');
-        announce('تعذّر تغيير كلمة المرور. تم إنهاء الجلسة لحماية الحساب.');
-        dom.loginPassword.focus();
-      });
+      showInlineError(dom.passwordChangeError, message);
+      announce('تعذّر تغيير كلمة المرور. راجع البيانات وحاول مرة أخرى.');
+      if (error && error.code === 'INVALID_CURRENT_PASSWORD') {
+        dom.currentPassword.value = '';
+        dom.currentPassword.focus();
+      } else {
+        dom.newPassword.focus();
+      }
     }).finally(function () { setLoading(dom.passwordChangeSubmit, false); });
   }
 
@@ -432,6 +454,9 @@
     state.dashboardDays = DASHBOARD_DEFAULT_DAYS;
     state.dashboardLoadedDays = 0;
     state.dashboardRequestId += 1;
+    state.listRequestIds.items += 1;
+    state.listRequestIds.movements += 1;
+    state.listRequestIds.users += 1;
     state.dashboardLoading = false;
     state.catalogItems = [];
     state.itemCatalog = { total: 0, activeTotal: 0, returned: 0, truncated: false };
@@ -440,10 +465,32 @@
     state.recentMovements = [];
     state.users = [];
     state.loaded = { dashboard: false, items: false, movements: false, users: false };
+    state.lastResponses = { items: null, movements: null, users: null };
+    state.paging = {
+      items: { page: 1, pageSize: PAGE_SIZE, total: 0, hasMore: false },
+      movements: { page: 1, pageSize: PAGE_SIZE, total: 0, hasMore: false },
+      users: { page: 1, pageSize: PAGE_SIZE, total: 0, hasMore: false }
+    };
     state.credentials = null;
     window.clearTimeout(state.globalSearchTimer);
     state.globalSearchRequestId += 1;
+    resetFilterControls();
     closeSearchResults();
+  }
+
+  function resetFilterControls() {
+    if (!dom.movementQuery) return;
+    dom.movementQuery.value = '';
+    dom.movementTypeFilter.value = '';
+    dom.movementItemFilter.value = '';
+    dom.movementDateFrom.value = '';
+    dom.movementDateTo.value = '';
+    dom.itemQuery.value = '';
+    dom.itemStatusFilter.value = '';
+    dom.userQuery.value = '';
+    dom.userStatusFilter.value = '';
+    dom.globalSearchInput.value = '';
+    updateCsvScopeNote();
   }
 
   function forceSignOut(message) {
@@ -571,6 +618,7 @@
   }
 
   function handlePossibleAuthError(error) {
+    if (error && error.code === 'STALE_RESPONSE') return true;
     if (error && error.code === 'PASSWORD_CHANGE_REQUIRED') {
       showPasswordChangeGate();
       return true;
@@ -1963,6 +2011,8 @@
   }
 
   function openEntityDialog(title, eyebrow, content, source) {
+    state.dialogOperationId += 1;
+    state.dialogPending = false;
     state.dialogReturnFocus = source || document.activeElement;
     dom.entityDialogEyebrow.textContent = eyebrow || '';
     dom.entityDialogTitle.textContent = title || '';
@@ -1975,7 +2025,13 @@
     }, 0);
   }
 
+  function requestEntityDialogClose() {
+    if (state.dialogPending || !dom.entityDialog.open) return;
+    dom.entityDialog.close();
+  }
+
   function closeDialogFromBackdrop(event) {
+    if (state.dialogPending) return;
     if (event.target !== event.currentTarget) return;
     var rect = event.currentTarget.getBoundingClientRect();
     var outside = event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom;

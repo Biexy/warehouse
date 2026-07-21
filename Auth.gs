@@ -19,6 +19,14 @@ var AUTH_CONFIG_ = Object.freeze({
 
 var WAREHOUSE_ROLES_ = Object.freeze(['ADMIN', 'STOREKEEPER', 'AUDITOR']);
 
+// Authentication mutations are not transactional across the USERS and AUDIT
+// sheets. Validate the audit schema before changing credentials, then retain a
+// bounded Script Properties outbox if the post-commit audit append still fails
+// because of a transient Sheets error or quota.
+var AUTH_AUDIT_OUTBOX_PROPERTY_ = 'WAREHOUSE_AUTH_AUDIT_OUTBOX_V1';
+var AUTH_AUDIT_OUTBOX_MAX_EVENTS_ = 12;
+var AUTH_AUDIT_OUTBOX_MAX_CHARS_ = 8000;
+
 /**
  * authenticate({username,password}) -> {token,expiresAt,user}
  * The raw opaque token is returned once; only its SHA-256 digest is cached.
@@ -37,9 +45,7 @@ function authenticate(credentials) {
     var prepared = {
       normalized: input.normalized,
       observedSalt: observation.salt,
-      candidateHash: derivePasswordHash_(input.normalized || 'unknown', input.password, observation.salt),
-      initialAdminPasswordMatch: input.normalized === 'admin' &&
-        constantTimeEqual_(input.password, INITIAL_ADMIN_PASSWORD_)
+      candidateHash: derivePasswordHash_(input.normalized || 'unknown', input.password, observation.salt)
     };
     return withScriptLock_(function () {
       return authenticateInternal_(prepared);
@@ -59,7 +65,7 @@ function logout(token) {
     return withScriptLock_(function () {
       var session = requireSession_(token, null, { allowPasswordChange: true });
       CacheService.getScriptCache().remove(session.cacheKey);
-      appendAuditRecord_({
+      var auditWarning = appendCommittedAuthAudit_({
         actor: session.user,
         action: 'LOGOUT',
         entityType: 'SESSION',
@@ -67,7 +73,9 @@ function logout(token) {
         status: 'SUCCESS',
         details: {}
       });
-      return { loggedOut: true };
+      var result = { loggedOut: true };
+      if (auditWarning) result.auditWarning = auditWarning;
+      return result;
     });
   });
 }
@@ -111,6 +119,7 @@ function saveUser(token, payload) {
       var session = requireSession_(token, ['ADMIN']);
       if (!payload.id) {
         var temporaryPassword = generateTemporaryPassword_(payload.username);
+        preflightAuthAudit_();
         var created = createUserRecord_({
           username: payload.username,
           displayName: payload.displayName,
@@ -120,7 +129,7 @@ function saveUser(token, payload) {
           forcePasswordChange: true,
           actor: session.user.username
         });
-        appendAuditRecord_({
+        var createAuditWarning = appendCommittedAuthAudit_({
           actor: session.user,
           action: 'USER_CREATE',
           entityType: 'USER',
@@ -128,7 +137,9 @@ function saveUser(token, payload) {
           status: 'SUCCESS',
           details: { username: created.username, role: created.role, active: created.active }
         });
-        return { user: publicUser_(created), temporaryPassword: temporaryPassword };
+        var createResult = { user: publicUser_(created), temporaryPassword: temporaryPassword };
+        if (createAuditWarning) createResult.auditWarning = createAuditWarning;
+        return createResult;
       }
 
       var user = findUserById_(requireText_(payload.id, 'معرف المستخدم', 100, false));
@@ -145,13 +156,14 @@ function saveUser(token, payload) {
       }
       ensureAnActiveAdminRemains_(user, role, active);
 
+      preflightAuthAudit_();
       var updated = updateUserFields_(user, {
         displayName: displayName,
         role: role,
         active: active,
         sessionVersion: user.sessionVersion + 1
       });
-      appendAuditRecord_({
+      var updateAuditWarning = appendCommittedAuthAudit_({
         actor: session.user,
         action: 'USER_UPDATE',
         entityType: 'USER',
@@ -159,7 +171,9 @@ function saveUser(token, payload) {
         status: 'SUCCESS',
         details: { username: updated.username, role: updated.role, active: updated.active }
       });
-      return { user: publicUser_(updated) };
+      var updateResult = { user: publicUser_(updated) };
+      if (updateAuditWarning) updateResult.auditWarning = updateAuditWarning;
+      return updateResult;
     });
   });
 }
@@ -175,6 +189,7 @@ function resetUserPassword(token, payload) {
       if (!user) throw new WarehouseError_('USER_NOT_FOUND', 'المستخدم غير موجود.');
       var temporaryPassword = generateTemporaryPassword_(user.username);
       var salt = generatePasswordSalt_();
+      preflightAuthAudit_();
       var updated = updateUserFields_(user, {
         passwordSalt: salt,
         passwordHash: derivePasswordHash_(user.username, temporaryPassword, salt),
@@ -183,7 +198,8 @@ function resetUserPassword(token, payload) {
         forcePasswordChange: true,
         sessionVersion: user.sessionVersion + 1
       });
-      appendAuditRecord_({
+      clearUserLoginRateLimit_(updated.username);
+      var auditWarning = appendCommittedAuthAudit_({
         actor: session.user,
         action: 'USER_PASSWORD_RESET',
         entityType: 'USER',
@@ -191,7 +207,9 @@ function resetUserPassword(token, payload) {
         status: 'SUCCESS',
         details: { username: updated.username }
       });
-      return { user: publicUser_(updated), temporaryPassword: temporaryPassword };
+      var result = { user: publicUser_(updated), temporaryPassword: temporaryPassword };
+      if (auditWarning) result.auditWarning = auditWarning;
+      return result;
     });
   });
 }
@@ -216,6 +234,7 @@ function changeMyPassword(token, payload) {
         throw new WarehouseError_('PASSWORD_REUSED', 'اختر كلمة مرور جديدة.');
       }
       var salt = generatePasswordSalt_();
+      preflightAuthAudit_();
       updateUserFields_(user, {
         passwordSalt: salt,
         passwordHash: derivePasswordHash_(user.username, newPassword, salt),
@@ -225,7 +244,7 @@ function changeMyPassword(token, payload) {
         sessionVersion: user.sessionVersion + 1
       });
       CacheService.getScriptCache().remove(session.cacheKey);
-      appendAuditRecord_({
+      var auditWarning = appendCommittedAuthAudit_({
         actor: session.user,
         action: 'PASSWORD_CHANGE',
         entityType: 'USER',
@@ -233,7 +252,9 @@ function changeMyPassword(token, payload) {
         status: 'SUCCESS',
         details: {}
       });
-      return { changed: true, requiresLogin: true };
+      var result = { changed: true, requiresLogin: true };
+      if (auditWarning) result.auditWarning = auditWarning;
+      return result;
     });
   });
 }
@@ -252,45 +273,6 @@ function authenticateInternal_(prepared) {
   var normalized = prepared.normalized;
   var user = findUserByNormalizedUsername_(normalized);
   var now = new Date();
-  var normalHashMatches = !!user && user.passwordSalt === prepared.observedSalt &&
-    constantTimeEqual_(prepared.candidateHash, user.passwordHash);
-  var lockIsActive = !!(user && user.lockedUntil && new Date(user.lockedUntil).getTime() > now.getTime());
-
-  // One-time compatibility repair for an admin created before the fixed
-  // first-login password was introduced. Strict predicates keep this from
-  // becoming a permanent password bypass: after the first successful login
-  // lastLoginAt is populated, and the mandatory password change also clears
-  // forcePasswordChange.
-  var canRepairInitialAdmin = !!user &&
-    !normalHashMatches &&
-    !lockIsActive &&
-    prepared.initialAdminPasswordMatch === true &&
-    user.username === 'admin' &&
-    user.role === 'ADMIN' &&
-    user.active === true &&
-    user.forcePasswordChange === true &&
-    !user.lastLoginAt &&
-    user.createdBy === 'SYSTEM' &&
-    countUserRows_() === 1;
-  if (canRepairInitialAdmin) {
-    var repairedSalt = generatePasswordSalt_();
-    user = updateUserFields_(user, {
-      passwordSalt: repairedSalt,
-      passwordHash: derivePasswordHash_(user.username, INITIAL_ADMIN_PASSWORD_, repairedSalt),
-      sessionVersion: user.sessionVersion + 1
-    });
-    appendAuditRecord_({
-      actor: { id: user.id, username: user.username, displayName: user.displayName },
-      action: 'INITIAL_ADMIN_PASSWORD_REPAIRED',
-      entityType: 'USER',
-      entityId: user.id,
-      status: 'SUCCESS',
-      details: {}
-    });
-    prepared.observedSalt = user.passwordSalt;
-    prepared.candidateHash = derivePasswordHash_(user.username, INITIAL_ADMIN_PASSWORD_, user.passwordSalt);
-    normalHashMatches = true;
-  }
 
   if (user && user.lockedUntil && new Date(user.lockedUntil).getTime() > now.getTime()) {
     throw new WarehouseError_('ACCOUNT_LOCKED', 'الحساب مقفل مؤقتاً بعد محاولات فاشلة.', { lockedUntil: isoDate_(user.lockedUntil) });
@@ -307,7 +289,7 @@ function authenticateInternal_(prepared) {
       var failures = user.failedAttempts + 1;
       var lockedUntil = failures >= AUTH_CONFIG_.LOCK_AFTER_FAILURES ? new Date(now.getTime() + AUTH_CONFIG_.LOCK_DURATION_MS) : '';
       updateUserFields_(user, { failedAttempts: failures, lockedUntil: lockedUntil });
-      appendAuditRecord_({
+      appendCommittedAuthAudit_({
         actor: { id: user.id, username: user.username, displayName: user.displayName },
         action: 'LOGIN_FAILED',
         entityType: 'SESSION',
@@ -326,7 +308,7 @@ function authenticateInternal_(prepared) {
   clearLoginRateLimit_(normalized);
   user = updateUserFields_(user, { failedAttempts: 0, lockedUntil: '', lastLoginAt: now });
   var issued = issueSession_(user);
-  appendAuditRecord_({
+  var auditWarning = appendCommittedAuthAudit_({
     actor: user,
     action: 'LOGIN_SUCCESS',
     entityType: 'SESSION',
@@ -334,7 +316,9 @@ function authenticateInternal_(prepared) {
     status: 'SUCCESS',
     details: { expiresAt: issued.expiresAt }
   });
-  return { token: issued.token, expiresAt: issued.expiresAt, user: publicUser_(user) };
+  var result = { token: issued.token, expiresAt: issued.expiresAt, user: publicUser_(user) };
+  if (auditWarning) result.auditWarning = auditWarning;
+  return result;
 }
 
 function issueSession_(user) {
@@ -512,6 +496,147 @@ function constantTimeEqual_(left, right) {
   return mismatch === 0;
 }
 
+/** Fail before a credential mutation if the audit sheet is structurally unusable. */
+function preflightAuthAudit_() {
+  schemaMetadata_('AUDIT');
+}
+
+/**
+ * Append an audit record after a mutation that has already committed.
+ *
+ * Sheets has no cross-sheet transaction. A transient audit failure must not
+ * turn a successful password change/reset into an API failure that hides the
+ * new credential. The sanitized event is retained in a bounded Script
+ * Properties outbox and replayed on the next successful authentication audit.
+ */
+function appendCommittedAuthAudit_(input) {
+  try {
+    flushPendingAuthAudits_();
+    appendAuditRecord_(input);
+    return null;
+  } catch (error) {
+    var event = pendingAuthAuditEvent_(input, error);
+    var queued = false;
+    try {
+      var pending = readPendingAuthAudits_();
+      pending.push(event);
+      writePendingAuthAudits_(pending);
+      queued = true;
+    } catch (queueError) {
+      try {
+        Logger.log(JSON.stringify({
+          level: 'ERROR',
+          action: 'AUTH_AUDIT_OUTBOX_WRITE_FAILED',
+          incidentId: event.incidentId,
+          message: queueError && queueError.message ? queueError.message : String(queueError)
+        }));
+      } catch (ignored) { /* Execution logging is best effort. */ }
+    }
+    try {
+      Logger.log(JSON.stringify({
+        level: 'ERROR',
+        action: 'AUTH_AUDIT_DEFERRED',
+        incidentId: event.incidentId,
+        queued: queued,
+        originalAction: event.record.action,
+        message: event.failureMessage
+      }));
+    } catch (ignoredLog) { /* The truthful API result still survives logging failure. */ }
+    return {
+      code: queued ? 'AUDIT_DEFERRED' : 'AUDIT_LOG_FAILED',
+      incidentId: event.incidentId,
+      queued: queued,
+      message: queued ?
+        'تمت العملية، وسيعاد تسجيل التدقيق تلقائياً عند عودة الخدمة.' :
+        'تمت العملية، لكن تعذر حفظ سجل التدقيق الاحتياطي. راجع سجل التنفيذ.'
+    };
+  }
+}
+
+function pendingAuthAuditEvent_(input, error) {
+  input = input || {};
+  var actor = input.actor || {};
+  var details = input.details === undefined ? {} : input.details;
+  var serializedDetails;
+  try { serializedDetails = JSON.stringify(details); } catch (ignored) { serializedDetails = '{}'; }
+  if (serializedDetails.length > 1200) {
+    details = { truncated: true, preview: serializedDetails.substring(0, 1000) };
+  } else {
+    try { details = JSON.parse(serializedDetails); } catch (ignoredParse) { details = {}; }
+  }
+  return {
+    incidentId: 'AUTH-AUDIT-' + Utilities.getUuid(),
+    occurredAt: new Date().toISOString(),
+    failureMessage: error && error.message ? String(error.message).substring(0, 500) : String(error).substring(0, 500),
+    record: {
+      actor: {
+        id: actor.id || '',
+        username: actor.username || '',
+        displayName: actor.displayName || ''
+      },
+      action: input.action || 'UNKNOWN',
+      entityType: input.entityType || '',
+      entityId: input.entityId || '',
+      status: input.status || 'SUCCESS',
+      details: details
+    }
+  };
+}
+
+function readPendingAuthAudits_() {
+  var raw = PropertiesService.getScriptProperties().getProperty(AUTH_AUDIT_OUTBOX_PROPERTY_);
+  if (!raw) return [];
+  var parsed;
+  try { parsed = JSON.parse(raw); } catch (ignored) { parsed = []; }
+  if (Object.prototype.toString.call(parsed) !== '[object Array]') return [];
+  return parsed.filter(function (event) {
+    return !!(event && event.record && event.incidentId);
+  });
+}
+
+function writePendingAuthAudits_(pending) {
+  var properties = PropertiesService.getScriptProperties();
+  pending = pending.slice(-AUTH_AUDIT_OUTBOX_MAX_EVENTS_);
+  var serialized = JSON.stringify(pending);
+  while (pending.length > 1 && serialized.length > AUTH_AUDIT_OUTBOX_MAX_CHARS_) {
+    pending.shift();
+    serialized = JSON.stringify(pending);
+  }
+  if (serialized.length > AUTH_AUDIT_OUTBOX_MAX_CHARS_) {
+    pending[0].record.details = { omitted: true };
+    pending[0].failureMessage = pending[0].failureMessage.substring(0, 200);
+    serialized = JSON.stringify(pending);
+  }
+  if (!pending.length) properties.deleteProperty(AUTH_AUDIT_OUTBOX_PROPERTY_);
+  else properties.setProperty(AUTH_AUDIT_OUTBOX_PROPERTY_, serialized);
+}
+
+function flushPendingAuthAudits_() {
+  var pending = readPendingAuthAudits_();
+  while (pending.length) {
+    var event = pending[0];
+    var record = event.record || {};
+    var details = record.details;
+    if (!details || Object.prototype.toString.call(details) !== '[object Object]') {
+      details = { originalDetails: details === undefined ? null : details };
+    }
+    details.deferredAudit = {
+      incidentId: event.incidentId || '',
+      occurredAt: event.occurredAt || ''
+    };
+    appendAuditRecord_({
+      actor: record.actor || {},
+      action: record.action || 'UNKNOWN',
+      entityType: record.entityType || '',
+      entityId: record.entityId || '',
+      status: record.status || 'SUCCESS',
+      details: details
+    });
+    pending.shift();
+    writePendingAuthAudits_(pending);
+  }
+}
+
 function sessionCacheKey_(token) {
   var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(token), Utilities.Charset.UTF_8);
   return 'session:' + bytesToHex_(digest);
@@ -537,13 +662,17 @@ function enforceLoginRateLimit_(username) {
 
 function clearLoginRateLimit_(username) {
   var cache = CacheService.getScriptCache();
-  cache.remove(loginRateKey_(username));
+  clearUserLoginRateLimit_(username);
   decrementRateBucket_(cache, 'login-rate:global');
+}
+
+function clearUserLoginRateLimit_(username) {
+  CacheService.getScriptCache().remove(loginRateKey_(normalizeUsername_(username)));
 }
 
 function clearRecoveryRateLimits_(username) {
   var cache = CacheService.getScriptCache();
-  cache.remove(loginRateKey_(normalizeUsername_(username)));
+  clearUserLoginRateLimit_(username);
   cache.remove('login-rate:global');
 }
 

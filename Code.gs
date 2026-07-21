@@ -204,6 +204,7 @@ function recoverAdministratorAccess_(spreadsheet, operator) {
   return withScriptLock_(function () {
     operator = operator || requireSpreadsheetOwner_(spreadsheet);
     setupRepository_(spreadsheet);
+    preflightAuthAudit_();
     var duplicateRepair = archiveDuplicateAdministratorRows_();
     var users = allUserRecords_();
     if (!users.length) {
@@ -242,7 +243,7 @@ function recoverAdministratorAccess_(spreadsheet, operator) {
       sessionVersion: administrator.sessionVersion + 1
     });
     clearRecoveryRateLimits_(administrator.username);
-    appendAuditRecord_({
+    var auditWarning = appendCommittedAuthAudit_({
       actor: operator,
       action: 'ADMIN_RECOVERY',
       entityType: 'USER',
@@ -253,7 +254,7 @@ function recoverAdministratorAccess_(spreadsheet, operator) {
         duplicateAdministratorsArchived: duplicateRepair.archived
       }
     });
-    return {
+    var result = {
       recovered: true,
       username: administrator.username,
       temporaryPassword: temporaryPassword,
@@ -262,6 +263,8 @@ function recoverAdministratorAccess_(spreadsheet, operator) {
       duplicateAdministratorsArchived: duplicateRepair.archived,
       warning: pepperWasMissing ? 'يجب إعادة تعيين كلمات مرور باقي المستخدمين من لوحة المدير.' : ''
     };
+    if (auditWarning) result.auditWarning = auditWarning;
+    return result;
   });
 }
 
