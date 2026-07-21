@@ -1,0 +1,14 @@
+[
+  {
+    "date": "2026-07-21",
+    "scope": "app",
+    "macrostructure": "Workbench",
+    "theme": "custom",
+    "theme_axes": "dark / geometric-sans / cool",
+    "vibe": "industrial precision, Arabic, cool, operational",
+    "enrichment": "none",
+    "nav": "N13",
+    "footer": "Ft2",
+    "brief": "Arabic warehouse inventory control with Apps Script"
+  }
+]
