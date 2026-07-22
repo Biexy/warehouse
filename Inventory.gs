@@ -102,36 +102,70 @@ function listItems(token, params) {
   return apiResult_(function () {
     requireSession_(token, ['ADMIN', 'STOREKEEPER', 'AUDITOR']);
     ensureRepositorySchemaCurrent_();
-    params = params || {};
-    var paging = clampPage_(params);
-    var query = requireText_(params.query, 'البحث', 200, true).toLowerCase();
-    var status = normalizeListEnum_(params.status, 'ALL', ITEM_LIST_STATUSES_, 'status', 'حالة الصنف');
-    var owner = requireText_(params.owner, 'المالك', 100, true).toLowerCase();
-    var data = inventorySnapshot_(DASHBOARD_CONFIG_.DEFAULT_DAYS);
-    var owners = catalogOwnerOptions_(data.items);
-    var items = data.items.map(function (item) {
-      return publicItem_(item, data.balances[item.id] || 0, data.itemStats[item.id]);
-    }).filter(function (item) {
-      if (query && (item.code + ' ' + item.name + ' ' + item.owner + ' ' + item.unit).toLowerCase().indexOf(query) === -1) return false;
-      if (owner && String(item.owner || '').toLowerCase() !== owner) return false;
-      if (status === 'ACTIVE' && !item.active) return false;
-      if (status === 'INACTIVE' && item.active) return false;
-      if (status === 'LOW' && item.stockStatus !== 'LOW') return false;
-      if (status === 'OUT' && item.stockStatus !== 'OUT') return false;
-      if ((status === 'AVAILABLE' || status === 'OK') && item.stockStatus !== 'OK') return false;
-      return true;
-    }).sort(function (a, b) { return a.code.localeCompare(b.code); });
-    var total = items.length;
-    var start = (paging.page - 1) * paging.pageSize;
+    var listing = inventoryListing_(params);
+    var start = (listing.paging.page - 1) * listing.paging.pageSize;
     return {
-      items: items.slice(start, start + paging.pageSize),
-      page: paging.page,
-      pageSize: paging.pageSize,
-      total: total,
-      owners: owners,
-      hasMore: start + paging.pageSize < total
+      items: listing.items.slice(start, start + listing.paging.pageSize),
+      page: listing.paging.page,
+      pageSize: listing.paging.pageSize,
+      total: listing.items.length,
+      owners: listing.owners,
+      hasMore: start + listing.paging.pageSize < listing.items.length
     };
   });
+}
+
+/**
+ * getInventoryReport(token,{query,status,owner}) -> complete filtered stock
+ * report. Unlike listItems this intentionally returns every matching item for
+ * CSV/PDF reports; the interactive table remains paginated.
+ */
+function getInventoryReport(token, params) {
+  return apiResult_(function () {
+    requireSession_(token, ['ADMIN', 'STOREKEEPER', 'AUDITOR']);
+    ensureRepositorySchemaCurrent_();
+    var listing = inventoryListing_(params);
+    var snapshot = listing.snapshot;
+    var allMovements = snapshot.movements || allMovementRecords_();
+    return {
+      items: listing.items,
+      total: listing.items.length,
+      owners: listing.owners,
+      filters: listing.filters,
+      generatedAt: isoDate_(new Date()),
+      recentMovements: publicMovements_(snapshot.recentRows || [], allMovements),
+      dashboard: dashboardFromSnapshot_(snapshot)
+    };
+  });
+}
+
+function inventoryListing_(params) {
+  params = params || {};
+  var paging = clampPage_(params);
+  var query = requireText_(params.query, 'البحث', 200, true).toLowerCase();
+  var status = normalizeListEnum_(params.status, 'ALL', ITEM_LIST_STATUSES_, 'status', 'حالة الصنف');
+  var owner = requireText_(params.owner, 'المالك', 100, true).toLowerCase();
+  var snapshot = inventorySnapshot_(DASHBOARD_CONFIG_.DEFAULT_DAYS);
+  var owners = catalogOwnerOptions_(snapshot.items);
+  var items = snapshot.items.map(function (item) {
+    return publicItem_(item, snapshot.balances[item.id] || 0, snapshot.itemStats[item.id]);
+  }).filter(function (item) {
+    if (query && (item.code + ' ' + item.name + ' ' + item.owner + ' ' + item.unit).toLowerCase().indexOf(query) === -1) return false;
+    if (owner && String(item.owner || '').toLowerCase() !== owner) return false;
+    if (status === 'ACTIVE' && !item.active) return false;
+    if (status === 'INACTIVE' && item.active) return false;
+    if (status === 'LOW' && item.stockStatus !== 'LOW') return false;
+    if (status === 'OUT' && item.stockStatus !== 'OUT') return false;
+    if ((status === 'AVAILABLE' || status === 'OK') && item.stockStatus !== 'OK') return false;
+    return true;
+  }).sort(function (a, b) { return a.code.localeCompare(b.code) || a.name.localeCompare(b.name); });
+  return {
+    snapshot: snapshot,
+    paging: paging,
+    items: items,
+    owners: owners,
+    filters: { query: query, status: status, owner: owner }
+  };
 }
 
 /** saveItem(token,payload) -> {item}; payload.id selects targeted update. */
@@ -228,53 +262,73 @@ function listMovements(token, params) {
   return apiResult_(function () {
     requireSession_(token, ['ADMIN', 'STOREKEEPER', 'AUDITOR']);
     ensureRepositorySchemaCurrent_();
-    params = params || {};
-    var paging = clampPage_(params);
-    var query = requireText_(params.query, 'البحث', 200, true).toLowerCase();
-    var type = normalizeListEnum_(params.type, 'ALL', MOVEMENT_LIST_TYPES_, 'type', 'نوع الحركة');
-    var itemId = String(params.itemId || '');
-    var itemQuery = requireText_(params.itemQuery, 'بحث الصنف', 200, true).toLowerCase();
-    var owner = requireText_(params.owner, 'المالك', 100, true);
-    var dateFrom = params.dateFrom ? parseDocumentDate_(params.dateFrom, 'dateFrom') : null;
-    var dateTo = params.dateTo ? parseDocumentDate_(params.dateTo, 'dateTo') : null;
-    var fromKey = dateFrom ? documentDateKey_(dateFrom) : null;
-    var toKey = dateTo ? documentDateKey_(dateTo) : null;
-    validateDocumentDateRange_(fromKey, toKey);
-    var items = allItemRecords_();
-    var itemById = Object.create(null);
-    items.forEach(function (item) { itemById[item.id] = item; });
-    var all = allMovementRecords_();
-    var movements = all.filter(function (movement) {
-      if (type !== 'ALL' && movement.type !== type) return false;
-      if (itemId && movement.itemId !== itemId) return false;
-      var currentItem = itemById[movement.itemId] || null;
-      if (owner && (!currentItem || currentItem.owner !== owner)) return false;
-      var itemHaystack = [
-        movement.itemCode,
-        movement.itemName,
-        currentItem && currentItem.code,
-        currentItem && currentItem.name,
-        currentItem && currentItem.owner
-      ].join(' ').toLowerCase();
-      if (itemQuery && itemHaystack.indexOf(itemQuery) === -1) return false;
-      var dateKey = documentDateKey_(movement.documentDate || movement.timestamp);
-      if (fromKey && dateKey < fromKey) return false;
-      if (toKey && dateKey > toKey) return false;
-      var haystack = [movement.id, movement.itemCode, movement.itemName, movement.party, movement.reference, movement.notes, movement.actorDisplayName].join(' ').toLowerCase();
-      return !query || haystack.indexOf(query) !== -1;
-    }).sort(newestMovementFirst_);
-    var total = movements.length;
-    var reportSummary = movementReportSummary_(movements, items, all);
-    var start = (paging.page - 1) * paging.pageSize;
+    var listing = movementListing_(params);
+    var reportSummary = movementReportSummary_(listing.movements, listing.items, listing.all);
+    var start = (listing.paging.page - 1) * listing.paging.pageSize;
     return {
-      movements: publicMovements_(movements.slice(start, start + paging.pageSize), all),
+      movements: publicMovements_(listing.movements.slice(start, start + listing.paging.pageSize), listing.all),
       summary: reportSummary,
-      page: paging.page,
-      pageSize: paging.pageSize,
-      total: total,
-      hasMore: start + paging.pageSize < total
+      page: listing.paging.page,
+      pageSize: listing.paging.pageSize,
+      total: listing.movements.length,
+      hasMore: start + listing.paging.pageSize < listing.movements.length
     };
   });
+}
+
+/** getMovementExport(token,filters) -> complete filtered append-only log. */
+function getMovementExport(token, params) {
+  return apiResult_(function () {
+    requireSession_(token, ['ADMIN', 'STOREKEEPER', 'AUDITOR']);
+    ensureRepositorySchemaCurrent_();
+    var listing = movementListing_(params);
+    return {
+      movements: publicMovements_(listing.movements, listing.all),
+      total: listing.movements.length,
+      summary: movementReportSummary_(listing.movements, listing.items, listing.all),
+      filters: listing.filters,
+      generatedAt: isoDate_(new Date())
+    };
+  });
+}
+
+function movementListing_(params) {
+  params = params || {};
+  var paging = clampPage_(params);
+  var query = requireText_(params.query, 'البحث', 200, true).toLowerCase();
+  var type = normalizeListEnum_(params.type, 'ALL', MOVEMENT_LIST_TYPES_, 'type', 'نوع الحركة');
+  var itemId = String(params.itemId || '');
+  var itemQuery = requireText_(params.itemQuery, 'بحث الصنف', 200, true).toLowerCase();
+  var owner = requireText_(params.owner, 'المالك', 100, true);
+  var dateFrom = params.dateFrom ? parseDocumentDate_(params.dateFrom, 'dateFrom') : null;
+  var dateTo = params.dateTo ? parseDocumentDate_(params.dateTo, 'dateTo') : null;
+  var fromKey = dateFrom ? documentDateKey_(dateFrom) : null;
+  var toKey = dateTo ? documentDateKey_(dateTo) : null;
+  validateDocumentDateRange_(fromKey, toKey);
+  var items = allItemRecords_();
+  var itemById = Object.create(null);
+  items.forEach(function (item) { itemById[item.id] = item; });
+  var all = allMovementRecords_();
+  var movements = all.filter(function (movement) {
+    if (type !== 'ALL' && movement.type !== type) return false;
+    if (itemId && movement.itemId !== itemId) return false;
+    var currentItem = itemById[movement.itemId] || null;
+    if (owner && (!currentItem || currentItem.owner !== owner)) return false;
+    var itemHaystack = [movement.itemCode, movement.itemName, currentItem && currentItem.code, currentItem && currentItem.name, currentItem && currentItem.owner].join(' ').toLowerCase();
+    if (itemQuery && itemHaystack.indexOf(itemQuery) === -1) return false;
+    var dateKey = documentDateKey_(movement.documentDate || movement.timestamp);
+    if (fromKey && dateKey < fromKey) return false;
+    if (toKey && dateKey > toKey) return false;
+    var haystack = [movement.id, movement.itemCode, movement.itemName, movement.party, movement.reference, movement.notes, movement.actorDisplayName].join(' ').toLowerCase();
+    return !query || haystack.indexOf(query) !== -1;
+  }).sort(newestMovementFirst_);
+  return {
+    paging: paging,
+    items: items,
+    all: all,
+    movements: movements,
+    filters: { query: query, type: type, itemId: itemId, itemQuery: itemQuery, owner: owner, dateFrom: fromKey || '', dateTo: toKey || '' }
+  };
 }
 
 /**

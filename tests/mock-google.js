@@ -13,8 +13,8 @@
   }
 
   var items = [
-    { id: 'ITM-1', code: 'PUMP-017', name: 'مضخة مياه صناعية', owner: 'سلطة المياه', unit: 'قطعة', openingQuantity: 18, currentQuantity: 12, reorderLevel: 5, active: true, stockStatus: 'OK' },
-    { id: 'ITM-2', code: 'VALVE-204', name: 'صمام تحكم نحاسي', owner: 'مصلحة المياه', unit: 'قطعة', openingQuantity: 9, currentQuantity: 3, reorderLevel: 4, active: true, stockStatus: 'LOW' },
+    { id: 'ITM-1', code: 'PUMP-017', name: 'مضخة مياه صناعية', owner: 'سلطة المياه', unit: 'قطعة', openingQuantity: 8, currentQuantity: 12, reorderLevel: 5, active: true, stockStatus: 'OK' },
+    { id: 'ITM-2', code: 'VALVE-204', name: 'صمام تحكم نحاسي', owner: 'مصلحة المياه', unit: 'قطعة', openingQuantity: 5, currentQuantity: 3, reorderLevel: 4, active: true, stockStatus: 'LOW' },
     { id: 'ITM-3', code: 'FILTER-08', name: 'مرشح هواء دقيق', owner: 'سلطة المياه', unit: 'علبة', openingQuantity: 6, currentQuantity: 0, reorderLevel: 2, active: true, stockStatus: 'OUT' }
   ];
   for (var itemIndex = 4; itemIndex <= 84; itemIndex += 1) {
@@ -277,6 +277,18 @@
     if (method === 'authenticate') return { token: 'wms_preview_token_1234567890123456789012345678901234567890', expiresAt: '2026-07-21T15:30:00.000Z', user: previewUser() };
     if (method === 'getBootstrap') return bootstrap();
     if (method === 'getDashboard') return dashboard(payload.days);
+    if (method === 'getInventoryReport') {
+      var reportItems = filterItems(payload);
+      return {
+        items: reportItems,
+        total: reportItems.length,
+        owners: ['سلطة المياه', 'مصلحة المياه'],
+        filters: { query: payload.query || '', owner: payload.owner || '', status: payload.status || 'ALL' },
+        generatedAt: new Date().toISOString(),
+        dashboard: dashboard(30),
+        recentMovements: movements.slice(0, 10)
+      };
+    }
     if (method === 'listItems') {
       var itemResult = paginate(filterItems(payload), payload, 'items');
       itemResult.owners = ['سلطة المياه', 'مصلحة المياه'];
@@ -287,6 +299,10 @@
       var movementResult = paginate(filteredMovements, payload, 'movements');
       movementResult.summary = movementReport(filteredMovements);
       return movementResult;
+    }
+    if (method === 'getMovementExport') {
+      var exportMovements = filterMovements(payload);
+      return { movements: exportMovements, total: exportMovements.length, summary: movementReport(exportMovements), generatedAt: new Date().toISOString() };
     }
     if (method === 'listUsers') return paginate(users, payload, 'users');
     if (method === 'logout') return { loggedOut: true };

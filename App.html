@@ -72,6 +72,7 @@
     quickMovementClientRequestId: '',
     quickMovementCorrection: null,
     quickItemEditing: null,
+    administrativeReport: null,
     pendingRpcCount: 0
   };
 
@@ -106,10 +107,10 @@
       'movementDateFrom', 'movementDateTo', 'movementsState', 'movementsTableBody',
       'movementReportPanel', 'movementReportState', 'movementReportByUnit',
       'movementReportItemsTable', 'movementReportItemsBody', 'exportMovementExcel',
-      'exportMovementPdf',
+      'exportMovementPdf', 'exportMovementCsv',
       'movementsPagination', 'movementsPrev', 'movementsNext', 'movementsPageText',
       'itemFilters', 'itemQuery', 'itemOwnerFilter', 'itemStatusFilter', 'itemsState', 'itemsTableBody',
-      'itemsPagination', 'itemsPrev', 'itemsNext', 'itemsPageText', 'csvDataset',
+      'itemsPagination', 'itemsPrev', 'itemsNext', 'itemsPageText', 'exportInventoryCsv', 'csvDataset',
       'csvScopeNote', 'exportCsvButton', 'createBackupButton', 'backupResult', 'reportState',
       'reportTableBody', 'userFilters', 'userQuery', 'userStatusFilter', 'usersState',
       'usersTableBody', 'usersPagination', 'usersPrev', 'usersNext', 'usersPageText',
@@ -128,7 +129,9 @@
       'quickItemUnit', 'quickItemOpeningField', 'quickItemOpening', 'quickItemReorder',
       'quickItemActive', 'quickItemError', 'quickItemSubmit', 'quickItemCancel',
       'ownersSummary', 'reportsDialog', 'reportsDialogClose', 'adminDialog',
-      'adminDialogClose'
+      'adminDialogClose', 'administrativeReportDialog', 'administrativeReportClose',
+      'administrativeReportDone', 'administrativeReportPrint', 'administrativeReportState',
+      'administrativeReportContent'
     ].forEach(function (id) { dom[id] = document.getElementById(id); });
   }
 
@@ -148,7 +151,10 @@
     dom.quickItemCancel.addEventListener('click', resetQuickItemForm);
     dom.reportsDialogClose.addEventListener('click', function () { dom.reportsDialog.close(); });
     dom.adminDialogClose.addEventListener('click', function () { dom.adminDialog.close(); });
-    [dom.reportsDialog, dom.adminDialog].forEach(function (dialog) {
+    dom.administrativeReportClose.addEventListener('click', function () { dom.administrativeReportDialog.close(); });
+    dom.administrativeReportDone.addEventListener('click', function () { dom.administrativeReportDialog.close(); });
+    dom.administrativeReportPrint.addEventListener('click', printAdministrativeReport);
+    [dom.reportsDialog, dom.adminDialog, dom.administrativeReportDialog].forEach(function (dialog) {
       dialog.addEventListener('click', closeDialogFromBackdrop);
       dialog.addEventListener('close', restoreDialogFocus);
     });
@@ -194,6 +200,8 @@
     dom.exportCsvButton.addEventListener('click', exportCsv);
     dom.csvDataset.addEventListener('change', updateCsvScopeNote);
     dom.createBackupButton.addEventListener('click', createBackup);
+    dom.exportInventoryCsv.addEventListener('click', exportInventoryBalances);
+    dom.exportMovementCsv.addEventListener('click', exportMovementLog);
     dom.exportMovementExcel.addEventListener('click', exportMovementReportExcel);
     dom.exportMovementPdf.addEventListener('click', exportMovementReportPdf);
 
@@ -705,7 +713,23 @@
     else if (action === 'focus-movement-out') focusQuickMovement('OUT');
     else if (action === 'focus-new-item') focusQuickItemForm();
     else if (action === 'import-provided-catalog') openProvidedCatalogImport(source);
+    else if (action === 'open-administrative-report') openAdministrativeReport(source);
+    else if (action === 'open-backups') openBackupsDialog(source);
+    else if (action === 'open-admin') openAdminDialog(source);
     else if (action === 'new-user') openUserForm(null, source);
+  }
+
+  function openBackupsDialog(source) {
+    if (!state.user || state.user.role !== 'ADMIN') return;
+    state.dialogReturnFocus = source || document.activeElement;
+    if (!dom.reportsDialog.open) dom.reportsDialog.showModal();
+  }
+
+  function openAdminDialog(source) {
+    if (!state.user || state.user.role !== 'ADMIN') return;
+    state.dialogReturnFocus = source || document.activeElement;
+    if (!dom.adminDialog.open) dom.adminDialog.showModal();
+    if (!state.loaded.users) loadUsers();
   }
 
   function handlePossibleAuthError(error) {
@@ -1308,6 +1332,7 @@
   function renderMovementReportLoading() {
     dom.movementReportPanel.setAttribute('aria-busy', 'true');
     dom.movementReportPanel.setAttribute('data-state', 'loading');
+    dom.exportMovementCsv.disabled = true;
     dom.exportMovementExcel.disabled = true;
     dom.exportMovementPdf.disabled = true;
     clearNode(dom.movementReportState);
@@ -1319,6 +1344,7 @@
   function renderMovementReportError(message) {
     dom.movementReportPanel.setAttribute('aria-busy', 'false');
     dom.movementReportPanel.setAttribute('data-state', 'error');
+    dom.exportMovementCsv.disabled = true;
     dom.exportMovementExcel.disabled = true;
     dom.exportMovementPdf.disabled = true;
     clearNode(dom.movementReportState);
@@ -1341,6 +1367,7 @@
 
     if (!summary || !Array.isArray(summary.byUnit) || !Array.isArray(summary.byItem)) {
       dom.movementReportPanel.setAttribute('data-state', 'unavailable');
+      dom.exportMovementCsv.disabled = true;
       dom.exportMovementExcel.disabled = true;
       dom.exportMovementPdf.disabled = true;
       dom.movementReportState.appendChild(createText('p', 'inline-alert inline-alert--error', 'بيانات التقرير غير متاحة في نسخة الخادم الحالية. انشر أحدث نسخة من ملفات Apps Script ثم أعد المحاولة.'));
@@ -1386,6 +1413,7 @@
       dom.movementReportItemsBody.appendChild(emptyRow);
     }
 
+    dom.exportMovementCsv.disabled = !(Number(summary.movementCount) > 0);
     dom.exportMovementExcel.disabled = !summary.byItem.length;
     dom.exportMovementPdf.disabled = !summary.byItem.length;
   }
@@ -2830,6 +2858,101 @@
     announce('بدأ تنزيل ملف CSV للصفحة المحمّلة حالياً، ويحتوي على ' + formatNumber(rows.length) + ' صفاً.');
   }
 
+  function currentInventoryReportParams() {
+    return {
+      query: dom.itemQuery.value.trim(),
+      owner: dom.itemOwnerFilter.value,
+      status: dom.itemStatusFilter.value
+    };
+  }
+
+  function currentMovementExportParams() {
+    return {
+      query: dom.movementQuery.value.trim(),
+      type: dom.movementTypeFilter.value,
+      itemQuery: dom.movementItemFilter.value.trim(),
+      owner: dom.movementOwnerFilter.value,
+      dateFrom: dom.movementDateFrom.value,
+      dateTo: dom.movementDateTo.value
+    };
+  }
+
+  function exportInventoryBalances() {
+    setLoading(dom.exportInventoryCsv, true);
+    rpc('getInventoryReport', currentInventoryReportParams()).then(function (report) {
+      var items = normalizeCollection(report, 'items');
+      if (!items.length) {
+        showToast('لا توجد أصناف للتصدير', 'غيّر مرشحات الأصناف ثم حاول مرة أخرى.', 'error');
+        return;
+      }
+      var rows = [
+        ['تقرير دليل الأرصدة المخزنية'],
+        ['نطاق الملف', 'كل الأصناف المطابقة للمرشحات، وليس الصفحة المعروضة فقط'],
+        ['عدد الأصناف', items.length],
+        ['تاريخ إنشاء الملف', report.generatedAt || new Date().toISOString()]
+      ];
+      inventoryReportFilterRows().forEach(function (entry) { rows.push(entry); });
+      rows.push([]);
+      rows.push(['رمز الصنف', 'اسم الصنف', 'المالك', 'الوحدة', 'الرصيد الافتتاحي', 'إجمالي الوارد', 'إجمالي الصادر', 'أثر العكس', 'الرصيد الحالي', 'حد إعادة الطلب', 'الحالة', 'نشط']);
+      items.forEach(function (item) {
+        rows.push([
+          item.code || '', item.name || '', item.owner || 'غير محدد', item.unit || 'غير محددة',
+          numericExportValue(item.openingQuantity), numericExportValue(item.totalIncoming),
+          numericExportValue(item.totalOutgoing), numericExportValue(item.reversalNet),
+          numericExportValue(itemQuantity(item)), numericExportValue(item.reorderLevel),
+          itemStatus(item).label, item.active === false ? 'لا' : 'نعم'
+        ]);
+      });
+      downloadBlob(new Blob(['\ufeff' + rows.map(function (row) { return row.map(csvCell).join(','); }).join('\r\n')], { type: 'text/csv;charset=utf-8' }), 'دليل-الأرصدة-المخزنية-' + fileDateStamp() + '.csv');
+      showToast('بدأ تنزيل تقرير الأرصدة', 'يشمل كل الأصناف المطابقة للمرشحات الحالية.', 'success');
+      announce('بدأ تنزيل تقرير الأرصدة المخزنية الكامل المطابق للمرشحات.');
+    }).catch(function (error) {
+      if (!handlePossibleAuthError(error)) showToast('تعذّر تصدير الأرصدة', error.message || 'حاول مرة أخرى.', 'error');
+    }).finally(function () { setLoading(dom.exportInventoryCsv, false); });
+  }
+
+  function exportMovementLog() {
+    setLoading(dom.exportMovementCsv, true);
+    rpc('getMovementExport', currentMovementExportParams()).then(function (report) {
+      var movements = normalizeCollection(report, 'movements');
+      if (!movements.length) {
+        showToast('لا توجد حركات للتصدير', 'غيّر مرشحات الحركات ثم حاول مرة أخرى.', 'error');
+        return;
+      }
+      var rows = [
+        ['تقرير الحركات المخزنية'],
+        ['نطاق الملف', 'كل الحركات المطابقة للمرشحات، وليس الصفحة المعروضة فقط'],
+        ['عدد الحركات', movements.length],
+        ['تاريخ إنشاء الملف', report.generatedAt || new Date().toISOString()]
+      ];
+      currentMovementReportFilters().forEach(function (entry) { rows.push(entry); });
+      rows.push([]);
+      rows.push(['رقم الحركة', 'وقت الخادم', 'تاريخ المستند', 'رمز الصنف', 'اسم الصنف', 'النوع', 'الكمية', 'الأثر على الرصيد', 'الرصيد قبل', 'الرصيد بعد', 'الجهة', 'رقم الإذن / الفاتورة', 'الملاحظات', 'المستخدم']);
+      movements.forEach(function (movement) {
+        rows.push([
+          movement.id || '', movement.timestamp || '', movement.documentDate || '', movement.itemCode || '', movement.itemName || '',
+          movement.type || '', numericExportValue(movement.quantity), numericExportValue(movement.netChange),
+          numericExportValue(movement.balanceBefore), numericExportValue(movement.balanceAfter), movement.party || '', movement.reference || '', movement.notes || '',
+          movement.actor && (movement.actor.displayName || movement.actor.username) || movement.actorDisplayName || movement.actorUsername || ''
+        ]);
+      });
+      downloadBlob(new Blob(['\ufeff' + rows.map(function (row) { return row.map(csvCell).join(','); }).join('\r\n')], { type: 'text/csv;charset=utf-8' }), 'حركات-المخزون-' + fileDateStamp() + '.csv');
+      showToast('بدأ تنزيل سجل الحركات', 'يشمل كل الحركات المطابقة للمرشحات الحالية.', 'success');
+      announce('بدأ تنزيل سجل الحركات الكامل المطابق للمرشحات.');
+    }).catch(function (error) {
+      if (!handlePossibleAuthError(error)) showToast('تعذّر تصدير الحركات', error.message || 'حاول مرة أخرى.', 'error');
+    }).finally(function () { setLoading(dom.exportMovementCsv, false); });
+  }
+
+  function inventoryReportFilterRows() {
+    var statusLabels = { '': 'كل الحالات', ALL: 'كل الحالات', ACTIVE: 'نشط', INACTIVE: 'موقوف', AVAILABLE: 'متوفر', LOW: 'منخفض', OUT: 'نافد', OK: 'متوفر' };
+    return [
+      ['البحث', dom.itemQuery.value.trim() || 'بدون عبارة بحث'],
+      ['المالك', dom.itemOwnerFilter.value || 'كل المالكين'],
+      ['الحالة', statusLabels[dom.itemStatusFilter.value] || dom.itemStatusFilter.value || 'كل الحالات']
+    ];
+  }
+
   function exportMovementReportExcel() {
     var summary = movementReportSummary();
     if (!summary || !Array.isArray(summary.byItem) || !summary.byItem.length) {
@@ -2967,6 +3090,168 @@
       reportWindow.print();
     }, 250);
     announce('فُتح تقرير الحركات للطباعة أو الحفظ بصيغة PDF.');
+  }
+
+  function openAdministrativeReport(source) {
+    if (!state.user) return;
+    state.dialogReturnFocus = source || document.activeElement;
+    state.administrativeReport = null;
+    dom.administrativeReportPrint.disabled = true;
+    clearNode(dom.administrativeReportContent);
+    renderLoading(dom.administrativeReportState);
+    if (!dom.administrativeReportDialog.open) dom.administrativeReportDialog.showModal();
+    rpc('getInventoryReport', currentInventoryReportParams()).then(function (report) {
+      state.administrativeReport = report || {};
+      clearNode(dom.administrativeReportState);
+      renderAdministrativeReport(state.administrativeReport);
+      dom.administrativeReportPrint.disabled = !normalizeCollection(report, 'items').length;
+      if (!normalizeCollection(report, 'items').length) {
+        renderEmpty(dom.administrativeReportState, 'items', 'لا توجد أصناف تطابق مرشحات التقرير الحالية.');
+      }
+    }).catch(function (error) {
+      if (handlePossibleAuthError(error)) return;
+      renderError(dom.administrativeReportState, error.message || 'تعذّر تجهيز التقرير الإداري.', function () { openAdministrativeReport(source); });
+    });
+  }
+
+  function renderAdministrativeReport(report) {
+    clearNode(dom.administrativeReportContent);
+    var items = normalizeCollection(report, 'items');
+    var movements = normalizeCollection(report, 'recentMovements');
+    var dashboard = report.dashboard || state.dashboard || {};
+    var summary = dashboard.summary || {};
+    var heading = createElement('header', 'administrative-report__heading');
+    var copy = createElement('div');
+    append(copy,
+      createText('p', 'eyebrow', 'نسخة معتمدة للاستعراض والتصدير'),
+      createText('h1', '', 'التقرير الإداري والرقابي لجرد المخزون'),
+      createText('p', 'muted', 'دليل الأرصدة والحركة المسجلة حتى وقت إنشاء التقرير.')
+    );
+    var issued = createElement('dl', 'administrative-report__issued');
+    appendAdministrativeFact(issued, 'تاريخ الاستخراج', formatDate(report.generatedAt || new Date().toISOString(), true));
+    appendAdministrativeFact(issued, 'المستخدم', state.user.displayName || state.user.username || '—');
+    appendAdministrativeFact(issued, 'نطاق الأصناف', formatNumber(items.length) + ' صنفاً مطابقاً');
+    append(heading, copy, issued);
+    dom.administrativeReportContent.appendChild(heading);
+
+    var metrics = createElement('section', 'administrative-report__metrics');
+    [
+      ['الأصناف المطابقة', items.length, 'items'],
+      ['تحتاج إجراء', firstDefined(summary, ['actionNeededCount']) || 0, 'alert'],
+      ['حركات مسجلة', firstDefined(summary, ['movementCount']) || 0, 'movements'],
+      ['آخر 10 حركات', movements.length, 'report']
+    ].forEach(function (entry) {
+      var card = createElement('article', 'administrative-report__metric');
+      append(card, makeIcon(entry[2]), createText('span', '', entry[0]), createText('strong', 'mono', formatNumber(entry[1])));
+      metrics.appendChild(card);
+    });
+    dom.administrativeReportContent.appendChild(metrics);
+
+    var filterNote = createElement('section', 'administrative-report__filters');
+    filterNote.appendChild(createText('strong', '', 'مرشحات دليل الأرصدة'));
+    var filterList = createElement('dl', 'administrative-report__filter-list');
+    inventoryReportFilterRows().forEach(function (entry) { appendAdministrativeFact(filterList, entry[0], entry[1]); });
+    append(filterNote, filterList);
+    dom.administrativeReportContent.appendChild(filterNote);
+
+    var stockSection = createElement('section', 'administrative-report__section');
+    append(stockSection, createText('h2', '', 'أولاً: دليل الأرصدة وحالة المخزون الحالية'), createText('p', 'muted', 'يشمل كل الأصناف المطابقة للمرشحات، وليس الصفحة المعروضة فقط.'));
+    stockSection.appendChild(buildAdministrativeTable(
+      ['الرمز', 'الصنف', 'المالك', 'الوحدة', 'الافتتاحي', 'الوارد', 'الصادر', 'أثر العكس', 'الرصيد الحالي', 'الحالة'],
+      items.map(function (item) {
+        return [item.code || '—', item.name || '—', item.owner || 'غير محدد', item.unit || 'غير محددة', item.openingQuantity || 0, item.totalIncoming || 0, item.totalOutgoing || 0, item.reversalNet || 0, itemQuantity(item), itemStatus(item).label];
+      }),
+      [4, 5, 6, 7, 8]
+    ));
+    dom.administrativeReportContent.appendChild(stockSection);
+
+    var movementSection = createElement('section', 'administrative-report__section');
+    append(movementSection, createText('h2', '', 'ثانياً: آخر الحركات التدقيقية'), createText('p', 'muted', 'أحدث 10 حركات تم حفظها في النظام وقت إعداد التقرير.'));
+    movementSection.appendChild(buildAdministrativeTable(
+      ['التاريخ', 'المستخدم', 'النوع', 'الصنف', 'الكمية', 'الجهة', 'المرجع', 'الملاحظات'],
+      movements.map(function (movement) {
+        return [
+          formatDate(movement.documentDate || movement.timestamp, false),
+          movement.actor && (movement.actor.displayName || movement.actor.username) || movement.actorDisplayName || movement.actorUsername || '—',
+          movementTypeLabel(movement.type),
+          (movement.itemName || '—') + (movement.itemCode ? ' (' + movement.itemCode + ')' : ''),
+          movement.quantity || 0, movement.party || '—', movement.reference || '—', movement.notes || '—'
+        ];
+      }),
+      [4]
+    ));
+    dom.administrativeReportContent.appendChild(movementSection);
+
+    var signatures = createElement('section', 'administrative-report__signatures');
+    ['أمين ومسؤول المستودع المعتمد', 'تدقيق واعتماد إدارة المنظومة'].forEach(function (label) {
+      var signature = createElement('div', 'administrative-report__signature');
+      append(signature, createText('strong', '', label), createText('span', '', 'التوقيع: ....................................'));
+      signatures.appendChild(signature);
+    });
+    dom.administrativeReportContent.appendChild(signatures);
+  }
+
+  function appendAdministrativeFact(container, label, value) {
+    var row = document.createElement('div');
+    append(row, createText('dt', '', label), createText('dd', '', value === undefined || value === null || value === '' ? '—' : value));
+    container.appendChild(row);
+  }
+
+  function buildAdministrativeTable(headers, rows, numericColumns) {
+    var frame = createElement('div', 'administrative-report__table-frame');
+    var table = document.createElement('table');
+    var head = document.createElement('thead');
+    var headRow = document.createElement('tr');
+    headers.forEach(function (header) { headRow.appendChild(createText('th', '', header)); });
+    head.appendChild(headRow);
+    var body = document.createElement('tbody');
+    if (!rows.length) {
+      var emptyRow = document.createElement('tr');
+      var emptyCell = createText('td', 'administrative-report__empty', 'لا توجد بيانات لعرضها.');
+      emptyCell.colSpan = headers.length;
+      emptyRow.appendChild(emptyCell);
+      body.appendChild(emptyRow);
+    } else {
+      rows.forEach(function (row) {
+        var tr = document.createElement('tr');
+        row.forEach(function (value, index) {
+          var cell = createText('td', numericColumns.indexOf(index) !== -1 ? 'mono number' : '', numericColumns.indexOf(index) !== -1 ? formatNumber(value) : value);
+          tr.appendChild(cell);
+        });
+        body.appendChild(tr);
+      });
+    }
+    append(table, head, body);
+    frame.appendChild(table);
+    return frame;
+  }
+
+  function movementTypeLabel(type) {
+    return ({ IN: 'وارد', OUT: 'صادر', REVERSAL: 'عكس' })[String(type || '').toUpperCase()] || type || '—';
+  }
+
+  function printAdministrativeReport() {
+    if (!state.administrativeReport || !dom.administrativeReportContent.childNodes.length) return;
+    var reportWindow = window.open('', '_blank');
+    if (!reportWindow) {
+      showToast('تعذّر فتح معاينة الطباعة', 'اسمح بالنوافذ المنبثقة لهذا الموقع ثم أعد المحاولة.', 'error');
+      return;
+    }
+    try { reportWindow.opener = null; } catch (ignored) { /* Some browsers make opener read-only. */ }
+    var doc = reportWindow.document;
+    doc.documentElement.lang = 'ar';
+    doc.documentElement.dir = 'rtl';
+    doc.title = 'التقرير الإداري للمخزون';
+    clearNode(doc.head);
+    clearNode(doc.body);
+    var charset = doc.createElement('meta');
+    charset.setAttribute('charset', 'utf-8');
+    var style = doc.createElement('style');
+    style.textContent = '@page{size:A4 landscape;margin:12mm}*{box-sizing:border-box}body{font-family:Arial,"Noto Sans Arabic",sans-serif;color:#172033;background:#fff;margin:0;line-height:1.45}.administrative-report{max-width:100%}.administrative-report__heading{display:flex;justify-content:space-between;gap:18px;border-bottom:3px double #172033;padding-bottom:12px}.administrative-report h1{font-size:22px;margin:0}.administrative-report h2{font-size:15px;margin:24px 0 6px}.administrative-report p{margin:4px 0;color:#526070}.administrative-report__issued,.administrative-report__filter-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 14px;margin:0}.administrative-report dl div{font-size:11px}.administrative-report dt{font-weight:700}.administrative-report dd{margin:2px 0 0}.administrative-report__metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin:18px 0}.administrative-report__metric{border:1px solid #cfd7e4;border-radius:8px;padding:9px}.administrative-report__metric strong{display:block;font-size:18px;margin-top:5px}.administrative-report__filters{border:1px solid #cfd7e4;border-radius:8px;padding:10px}.administrative-report__table-frame{overflow:visible}.administrative-report table{width:100%;border-collapse:collapse;font-size:10px}.administrative-report th,.administrative-report td{border:1px solid #cfd7e4;padding:5px;text-align:right;vertical-align:top}.administrative-report th{background:#edf2f7}.administrative-report tbody tr:nth-child(even){background:#f8fafc}.number{direction:ltr;text-align:left}.administrative-report__signatures{display:grid;grid-template-columns:1fr 1fr;gap:60px;margin-top:34px;text-align:center;font-size:11px}.administrative-report__signature{display:grid;gap:30px}@media print{thead{display:table-header-group}tr{break-inside:avoid}}';
+    append(doc.head, charset, style);
+    doc.body.appendChild(dom.administrativeReportContent.cloneNode(true));
+    window.setTimeout(function () { reportWindow.focus(); reportWindow.print(); }, 250);
+    announce('فُتحت نافذة الطباعة للتقرير الإداري.');
   }
 
   function currentMovementReportFilters() {
