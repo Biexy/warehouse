@@ -11,7 +11,7 @@ var WAREHOUSE_CONFIG_ = Object.freeze({
   SCHEMA_VERSION: '2',
   MAX_TEXT_LENGTH: 1000,
   MAX_PAGE_SIZE: 100,
-  LOCK_WAIT_MS: 30000
+  LOCK_WAIT_MS: 5000
 });
 
 // First-install administrator password. It is accepted only while the
@@ -90,7 +90,7 @@ function initializeWarehouseFromSheet() {
  * the user must replace it immediately through the mandatory password gate.
  */
 function setupSystem_(spreadsheet, operator) {
-  return withScriptLock_(function () {
+  var preparation = withScriptLock_(function () {
     setupRepository_(spreadsheet);
     var existingUserCount = countUserRows_();
     var pepperExists = !!PropertiesService.getScriptProperties().getProperty(AUTH_CONFIG_.PEPPER_PROPERTY);
@@ -103,7 +103,6 @@ function setupSystem_(spreadsheet, operator) {
     if (!pepperExists) ensurePasswordPepper_();
     ensureAuthEpoch_();
 
-    // Keep schema/settings completion idempotent even when an admin exists.
     setSettingValue_('SCHEMA_VERSION', WAREHOUSE_CONFIG_.SCHEMA_VERSION, 'NUMBER', 'إصدار مخطط البيانات', 'SYSTEM');
     setSettingValue_('SYSTEM_NAME', WAREHOUSE_CONFIG_.APP_NAME, 'TEXT', 'اسم النظام', 'SYSTEM');
     if (getSettingValue_('BACKUP_FOLDER_ID') === null) {
@@ -112,33 +111,55 @@ function setupSystem_(spreadsheet, operator) {
 
     var existingAdmin = findUserByNormalizedUsername_('admin');
     if (existingAdmin) {
-      var existingResult = {
+      return {
+        createAdmin: false,
+        result: {
+          initialized: true,
+          created: false,
+          message: 'النظام مهيأ مسبقاً، ولم يتم تغيير حساب المدير.'
+        }
+      };
+    }
+    if (existingUserCount > 0) {
+      throw new WarehouseError_('SETUP_CONFLICT', 'يوجد مستخدمون ولا يوجد حساب admin. أوقف الإعداد لحماية البيانات.');
+    }
+    return { createAdmin: true };
+  });
+
+  if (!preparation.createAdmin) {
+    Logger.log(JSON.stringify(preparation.result));
+    return preparation.result;
+  }
+
+  // Password derivation is intentionally outside the global lock. On Apps
+  // Script this is CPU-heavy and must not block login or bootstrap requests.
+  var temporaryPassword = INITIAL_ADMIN_PASSWORD_;
+  var credentialSalt = generatePasswordSalt_();
+  var credentialHash = derivePasswordHash_('admin', temporaryPassword, credentialSalt);
+
+  return withScriptLock_(function () {
+    var existingAdmin = findUserByNormalizedUsername_('admin');
+    if (existingAdmin) {
+      return {
         initialized: true,
         created: false,
         message: 'النظام مهيأ مسبقاً، ولم يتم تغيير حساب المدير.'
       };
-      Logger.log(JSON.stringify(existingResult));
-      return existingResult;
+    }
+    if (countUserRows_() > 0) {
+      throw new WarehouseError_('SETUP_CONFLICT', 'يوجد مستخدمون ولا يوجد حساب admin. أوقف الإعداد لحماية البيانات.');
     }
 
-    if (existingUserCount > 0) {
-      throw new WarehouseError_(
-        'SETUP_CONFLICT',
-        'يوجد مستخدمون ولا يوجد حساب admin. أوقف الإعداد لحماية البيانات.'
-      );
-    }
-
-    var temporaryPassword = INITIAL_ADMIN_PASSWORD_;
     var admin = createUserRecord_({
       username: 'admin',
       displayName: 'مدير النظام',
-      password: temporaryPassword,
+      passwordSalt: credentialSalt,
+      passwordHash: credentialHash,
       role: 'ADMIN',
       active: true,
       forcePasswordChange: true,
       actor: 'SYSTEM'
     });
-
     appendAuditRecord_({
       actor: operator || { id: 'SYSTEM', username: 'SYSTEM', displayName: 'SYSTEM' },
       action: 'SYSTEM_SETUP',
@@ -148,8 +169,7 @@ function setupSystem_(spreadsheet, operator) {
       details: { schemaVersion: WAREHOUSE_CONFIG_.SCHEMA_VERSION }
     });
     SpreadsheetApp.flush();
-
-    var result = {
+    return {
       initialized: true,
       created: true,
       username: admin.username,
@@ -158,7 +178,6 @@ function setupSystem_(spreadsheet, operator) {
       forcePasswordChange: true,
       warning: 'استخدم كلمة مرور أول الدخول ثم غيّرها من البوابة الإلزامية.'
     };
-    return result;
   });
 }
 
@@ -315,6 +334,7 @@ function publicError_(error) {
 /** All mutations use the script-wide lock, not a user-specific lock. */
 function withScriptLock_(callable) {
   var lock = LockService.getScriptLock();
+  var requestedAt = Date.now();
   try {
     lock.waitLock(WAREHOUSE_CONFIG_.LOCK_WAIT_MS);
   } catch (error) {
@@ -323,9 +343,21 @@ function withScriptLock_(callable) {
       'النظام مشغول بعملية أخرى. أعد المحاولة بعد لحظات.'
     );
   }
+  var acquiredAt = Date.now();
   try {
     return callable();
   } finally {
+    var releasedAt = Date.now();
+    var waitMs = acquiredAt - requestedAt;
+    var heldMs = releasedAt - acquiredAt;
+    if (waitMs >= 1000 || heldMs >= 3000) {
+      Logger.log(JSON.stringify({
+        level: 'WARNING',
+        action: 'SCRIPT_LOCK_SLOW',
+        waitMs: waitMs,
+        heldMs: heldMs
+      }));
+    }
     lock.releaseLock();
   }
 }

@@ -222,23 +222,37 @@ function resetUserPassword(token, payload) {
 function changeMyPassword(token, payload) {
   return apiResult_(function () {
     payload = requireObject_(payload, 'تغيير كلمة المرور');
+    var observedSession = requireSession_(token, null, { allowPasswordChange: true });
+    var observedUser = findUserById_(observedSession.user.id);
+    if (!observedUser) throw new WarehouseError_('USER_NOT_FOUND', 'المستخدم غير موجود.');
+
+    var currentPassword = String(payload.currentPassword || '');
+    var newPassword = String(payload.newPassword || '');
+    validateStrongPassword_(newPassword, observedUser.username);
+
+    // All expensive derivations run before requesting the global mutation
+    // lock. The snapshot is revalidated under the lock before the write.
+    var currentCandidateHash = derivePasswordHash_(observedUser.username, currentPassword, observedUser.passwordSalt);
+    if (!constantTimeEqual_(currentCandidateHash, observedUser.passwordHash)) {
+      throw new WarehouseError_('INVALID_CURRENT_PASSWORD', 'كلمة المرور الحالية غير صحيحة.');
+    }
+    var reusedCandidateHash = derivePasswordHash_(observedUser.username, newPassword, observedUser.passwordSalt);
+    if (constantTimeEqual_(reusedCandidateHash, observedUser.passwordHash)) {
+      throw new WarehouseError_('PASSWORD_REUSED', 'اختر كلمة مرور جديدة.');
+    }
+    var newSalt = generatePasswordSalt_();
+    var newPasswordHash = derivePasswordHash_(observedUser.username, newPassword, newSalt);
+
     return withScriptLock_(function () {
       var session = requireSession_(token, null, { allowPasswordChange: true });
       var user = findUserById_(session.user.id);
-      var currentPassword = String(payload.currentPassword || '');
-      var newPassword = String(payload.newPassword || '');
-      if (!constantTimeEqual_(derivePasswordHash_(user.username, currentPassword, user.passwordSalt), user.passwordHash)) {
-        throw new WarehouseError_('INVALID_CURRENT_PASSWORD', 'كلمة المرور الحالية غير صحيحة.');
+      if (!user || user.passwordSalt !== observedUser.passwordSalt || user.passwordHash !== observedUser.passwordHash || user.sessionVersion !== observedUser.sessionVersion) {
+        throw new WarehouseError_('SESSION_INVALIDATED', 'تغيرت بيانات الحساب أثناء الطلب. سجّل الدخول مجدداً.');
       }
-      validateStrongPassword_(newPassword, user.username);
-      if (constantTimeEqual_(derivePasswordHash_(user.username, newPassword, user.passwordSalt), user.passwordHash)) {
-        throw new WarehouseError_('PASSWORD_REUSED', 'اختر كلمة مرور جديدة.');
-      }
-      var salt = generatePasswordSalt_();
       preflightAuthAudit_();
       updateUserFields_(user, {
-        passwordSalt: salt,
-        passwordHash: derivePasswordHash_(user.username, newPassword, salt),
+        passwordSalt: newSalt,
+        passwordHash: newPasswordHash,
         failedAttempts: 0,
         lockedUntil: '',
         forcePasswordChange: false,

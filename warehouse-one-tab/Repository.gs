@@ -544,15 +544,26 @@ function createUserRecord_(input) {
   }
   var displayName = requireText_(input.displayName, 'الاسم المعروض', 100, false);
   var role = validateRole_(input.role);
-  validateStrongPassword_(input.password, username);
-  var salt = generatePasswordSalt_();
+  var salt;
+  var passwordHash;
+  if (input.passwordSalt && input.passwordHash) {
+    salt = requireText_(input.passwordSalt, 'ملح كلمة المرور', 256, false);
+    passwordHash = requireText_(input.passwordHash, 'بصمة كلمة المرور', 512, false);
+    if (passwordHash.indexOf('hmac-sha256$') !== 0) {
+      throw new WarehouseError_('INVALID_CREDENTIAL_MATERIAL', 'تعذر إنشاء بيانات دخول المستخدم.');
+    }
+  } else {
+    validateStrongPassword_(input.password, username);
+    salt = generatePasswordSalt_();
+    passwordHash = derivePasswordHash_(username, input.password, salt);
+  }
   var now = new Date();
   var record = {
     id: newId_('USR'),
     username: username,
     displayName: displayName,
     passwordSalt: salt,
-    passwordHash: derivePasswordHash_(username, input.password, salt),
+    passwordHash: passwordHash,
     role: role,
     active: parseBoolean_(input.active, true),
     failedAttempts: 0,
