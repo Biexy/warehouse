@@ -294,16 +294,13 @@
                         <p id="loginError" class="login-error hidden" role="alert"></p>
                         <button id="loginSubmit" type="submit" class="login-submit"><i class="fa-solid fa-right-to-bracket" aria-hidden="true"></i><span>الدخول إلى النظام</span></button>
                     </form>
-                    <div class="login-help">
-                        <span>تعذر عليك الدخول؟</span>
-                        <button type="button" class="login-help-button" onclick="openPasswordHelp()"><i class="fa-solid fa-key" aria-hidden="true"></i>إعادة تعيين كلمة المرور</button>
-                    </div>
+                    <div class="login-help"><span>تعذر عليك الدخول؟</span><button type="button" class="login-help-button" onclick="openPasswordHelp()"><i class="fa-solid fa-key" aria-hidden="true"></i>إعادة تعيين كلمة المرور</button></div>
                 </div>
             </div>
         </div>
     </section>
 
-    <section id="startupState" class="app-state-overlay hidden" role="status" aria-live="polite"><div class="app-state-card text-center"><i class="fa-solid fa-circle-notch fa-spin text-brand-neon text-2xl mb-4"></i><p class="font-bold text-white">جارٍ التحقق من الجلسة وتحميل البيانات…</p></div></section>
+    <section id="startupState" class="app-state-overlay hidden" role="status" aria-live="polite"><div class="app-state-card text-center"><i id="startupSpinner" class="fa-solid fa-circle-notch fa-spin text-brand-neon text-2xl mb-4"></i><p id="startupMessage" class="font-bold text-white">جارٍ التحقق من الجلسة وتحميل البيانات…</p><p id="startupErrorCode" class="hidden mt-3 text-xs leading-6 text-gray-400" dir="auto"></p><div id="startupActions" class="hidden mt-5 flex flex-col sm:flex-row gap-2 justify-center"><button type="button" onclick="retryBootstrap()" class="btn-primary px-4 py-2 rounded-xl text-xs font-black">إعادة تحميل البيانات</button><button type="button" onclick="loginWithAnotherAccount()" class="btn-secondary px-4 py-2 rounded-xl text-xs font-black">الدخول بحساب آخر</button></div></div></section>
 
     <div id="warehouseApp" class="hidden">
 
@@ -332,6 +329,7 @@
                 <div class="flex flex-wrap items-center gap-2 max-w-full bg-brand-darkBlue/80 pl-2 pr-3.5 py-1 rounded-xl border border-brand-neon/15">
                     <label class="text-xs text-gray-400 font-semibold whitespace-nowrap"><i class="fa-solid fa-user-circle text-brand-neon ml-1"></i>المستخدم الحالي:</label>
                     <span id="userSelector" class="text-white text-xs font-bold px-2 py-1 min-w-0 break-words"></span>
+                    <button id="changePasswordButton" onclick="openPasswordChangeModal()" class="w-11 h-11 inline-flex items-center justify-center rounded-lg text-brand-neon hover:text-white hover:bg-white/5 transition-all text-sm" title="تغيير كلمة المرور" aria-label="تغيير كلمة المرور"><i class="fa-solid fa-key"></i></button>
                     <button id="adminUsersButton" onclick="openUsersModal()" class="w-11 h-11 inline-flex items-center justify-center rounded-lg text-brand-neon hover:text-white hover:bg-white/5 transition-all text-sm" title="إدارة المستخدمين والصلاحيات" aria-label="إدارة المستخدمين والصلاحيات">
                         <i class="fa-solid fa-user-gear"></i>
                     </button>
@@ -896,7 +894,7 @@
                 <label class="block text-right"><span class="block text-xs font-bold text-gray-300 mb-1.5">كلمة المرور الجديدة</span><input type="password" id="newPasswordInput" minlength="6" required autocomplete="new-password" placeholder="6 أحرف على الأقل" class="w-full bg-brand-navy border border-gray-700 rounded-xl px-4 py-3 text-xs text-white focus:outline-none focus:border-brand-neon"></label>
                 <label class="block text-right"><span class="block text-xs font-bold text-gray-300 mb-1.5">تأكيد كلمة المرور</span><input type="password" id="confirmPasswordInput" minlength="6" required autocomplete="new-password" class="w-full bg-brand-navy border border-gray-700 rounded-xl px-4 py-3 text-xs text-white focus:outline-none focus:border-brand-neon"></label>
                 <p id="passwordChangeError" class="text-xs text-brand-crimson hidden" role="alert"></p>
-                <div class="flex gap-2"><button id="passwordChangeSubmit" type="submit" class="flex-grow bg-brand-neon text-brand-navy font-bold text-xs py-3 rounded-xl hover:opacity-90 transition-all shadow-md">حفظ كلمة المرور</button><button type="button" onclick="handleLogout()" class="bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold text-xs px-4 py-3 rounded-xl transition-all">خروج</button></div>
+                <div class="flex gap-2"><button id="passwordChangeSubmit" type="submit" class="flex-grow bg-brand-neon text-brand-navy font-bold text-xs py-3 rounded-xl hover:opacity-90 transition-all shadow-md">حفظ كلمة المرور</button><button id="passwordChangeCancelButton" type="button" onclick="cancelPasswordChange()" class="bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold text-xs px-4 py-3 rounded-xl transition-all">خروج</button></div>
             </form>
         </div>
     </div>

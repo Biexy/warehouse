@@ -3,7 +3,7 @@
 <head>
     <base target="_top">
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>نظام إدارة المخزون</title>
     <!-- استيراد الخطوط -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -58,6 +58,7 @@
             --ui-shadow: 0 22px 60px rgba(0, 0, 0, .28);
             --ui-radius: 1.1rem;
         }
+        html, body { overflow-x: clip; }
         body {
             font-family: var(--font-body);
             background-color: #090d16;
@@ -206,6 +207,33 @@
         .loading-row, .empty-row, .error-row { padding: 2rem !important; text-align: center !important; color: #9ca3af; }
         .error-row { color:#fca5a5; }
         .pagination-bar { display:flex; align-items:center; justify-content:center; gap:.75rem; padding-top:1rem; }
+        .workspace-tabs-shell { position: sticky; top: 4.85rem; z-index: 35; padding: .75rem 1rem 0; background: linear-gradient(180deg, rgba(9,13,22,.98) 72%, rgba(9,13,22,0)); }
+        .workspace-tabs { width: min(100%, 80rem); display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: .45rem; margin: 0 auto; padding: .45rem; border: 1px solid var(--ui-border); border-radius: 1rem; background: rgba(17,24,39,.94); box-shadow: 0 12px 30px rgba(0,0,0,.2); backdrop-filter: blur(14px); }
+        .workspace-tabs.workspace-tabs--admin { grid-template-columns: repeat(5,minmax(0,1fr)); }
+        .workspace-tab { min-height: 46px; display: inline-flex; align-items: center; justify-content: center; gap: .55rem; padding: .65rem .8rem; border: 1px solid transparent; border-radius: .75rem; color: #9aa7bb; font-size: .78rem; font-weight: 800; white-space: nowrap; transition: color .18s ease, background-color .18s ease, border-color .18s ease; }
+        .workspace-tab:hover { color: #f8fafc; background: rgba(148,163,184,.07); }
+        .workspace-tab[aria-selected="true"] { color: #e0f2fe; border-color: rgba(56,189,248,.32); background: rgba(56,189,248,.12); box-shadow: inset 0 -2px 0 #38bdf8; }
+        .workspace-tab:focus-visible { outline: 3px solid rgba(56,189,248,.52); outline-offset: 2px; }
+        [data-workspace-panel][hidden], #warehouseWorkspace[hidden] { display: none !important; }
+        .multitab-workspace { grid-template-columns: repeat(12,minmax(0,1fr)) !important; align-items: start; }
+        .multitab-layout-group { display: contents; }
+        #dashboardMetricsPanel, #dashboardAnalyticsPanel { grid-column: 1 / -1; }
+        #itemsWorkspacePanel { grid-column: span 9; }
+        #newItemWorkspacePanel { grid-column: span 3; position: sticky; top: 10rem; }
+        #movementWorkspacePanel { grid-column: 1 / -1; width: min(100%, 62rem); justify-self: center; }
+        .workspace-view-section { width: min(100%, 80rem); margin-inline: auto; padding: 1rem 1.5rem 2rem; }
+        .workspace-view-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+        .workspace-view-heading p { color: var(--ui-muted); font-size: .78rem; }
+        .report-hub-grid, .admin-hub-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 1rem; }
+        .report-action-card, .admin-action-card { min-width: 0; padding: 1.25rem; border: 1px solid var(--ui-border); border-radius: 1.1rem; background: rgba(28,37,65,.42); box-shadow: 0 14px 38px rgba(0,0,0,.16); }
+        .report-action-card h3, .admin-action-card h3 { color: #fff; font-size: .95rem; }
+        .report-filter-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .75rem; margin: 1rem 0; }
+        .report-filter-grid label { display: grid; gap: .35rem; color: var(--ui-muted); font-size: .7rem; font-weight: 700; }
+        .report-filter-grid input, .report-filter-grid select { width: 100%; padding: .65rem .75rem; border: 1px solid #374151; border-radius: .75rem; background: #0b132b; color: #fff; }
+        .report-filter-grid .report-filter-wide { grid-column: 1 / -1; }
+        .report-actions, .admin-actions { display: flex; flex-wrap: wrap; gap: .65rem; margin-top: 1rem; }
+        .report-actions button, .admin-actions button { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: .45rem; padding: .7rem .9rem; border: 1px solid rgba(148,163,184,.2); border-radius: .75rem; background: rgba(11,19,43,.72); color: #fff; font-size: .74rem; font-weight: 800; }
+        .admin-action-card__icon { width: 2.75rem; height: 2.75rem; display: grid; place-items: center; margin-bottom: .8rem; border-radius: .8rem; background: rgba(56,189,248,.1); color: #38bdf8; }
         @media (max-width: 1024px) {
             .inventory-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
             .inventory-toolbar .toolbar-search { grid-column: 1 / -1; }
@@ -214,6 +242,9 @@
             .inventory-primary { min-width: 9rem; }
             .table-actions { flex-direction: column; align-items: stretch; min-width: 4.8rem; }
             .table-action-button { width: 100%; padding-inline: .45rem; }
+            #itemsWorkspacePanel, #newItemWorkspacePanel { grid-column: 1 / -1; }
+            #newItemWorkspacePanel { position: static; }
+            .workspace-tabs-shell { position: static; }
         }
         @media (max-width: 640px) {
             .login-screen { align-items: flex-start; padding: .75rem; }
@@ -249,6 +280,19 @@
             .official-report__meta { margin-top: .75rem; }
             .official-report__metrics { grid-template-columns: repeat(2,minmax(0,1fr)); }
             .official-report__signatures { grid-template-columns: 1fr; gap: 1.5rem; }
+            body { padding-bottom: calc(5rem + env(safe-area-inset-bottom)); }
+            .workspace-tabs-shell { position: fixed; inset: auto 0 0 0; z-index: 40; padding: .45rem .5rem calc(.45rem + env(safe-area-inset-bottom)); background: rgba(9,13,22,.97); border-top: 1px solid var(--ui-border); }
+            .workspace-tabs { width: 100%; gap: .15rem; padding: .25rem; border: 0; border-radius: .8rem; box-shadow: none; }
+            .workspace-tab { min-width: 0; min-height: 50px; flex-direction: column; gap: .15rem; padding: .35rem .15rem; font-size: .61rem; }
+            .workspace-tab i { font-size: .92rem; }
+            .workspace-tab span { display: none; }
+            .workspace-tab::after { content: attr(data-mobile-label); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .workspace-tab[aria-selected="true"] { box-shadow: inset 0 2px 0 #38bdf8; }
+            .workspace-view-section { padding: 1rem .75rem 1.5rem; }
+            .workspace-view-heading, .report-hub-grid, .admin-hub-grid, .report-filter-grid { grid-template-columns: minmax(0,1fr); display: grid; }
+            .report-filter-grid .report-filter-wide { grid-column: auto; }
+            .report-actions, .admin-actions { display: grid; grid-template-columns: 1fr; }
+            .report-actions button, .admin-actions button { width: 100%; }
         }
         @media (max-width: 420px) {
             .metrics-grid { grid-template-columns: minmax(0, 1fr) !important; }
@@ -294,7 +338,10 @@
                         <p id="loginError" class="login-error hidden" role="alert"></p>
                         <button id="loginSubmit" type="submit" class="login-submit"><i class="fa-solid fa-right-to-bracket" aria-hidden="true"></i><span>الدخول إلى النظام</span></button>
                     </form>
-                    <div class="login-help"><span>تعذر عليك الدخول؟</span><button type="button" class="login-help-button" onclick="openPasswordHelp()"><i class="fa-solid fa-key" aria-hidden="true"></i>إعادة تعيين كلمة المرور</button></div>
+                    <div class="login-help">
+                        <span>تعذر عليك الدخول؟</span>
+                        <button type="button" class="login-help-button" onclick="openPasswordHelp()"><i class="fa-solid fa-key" aria-hidden="true"></i>إعادة تعيين كلمة المرور</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -342,13 +389,23 @@
 
     <div id="toastContainer" class="fixed top-24 left-6 z-50 flex flex-col gap-2"></div>
 
-    <main class="warehouse-workspace flex-grow max-w-7xl w-full mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <nav class="workspace-tabs-shell" aria-label="أقسام نظام المخزون">
+        <div id="workspaceTabList" class="workspace-tabs" role="tablist" aria-orientation="horizontal">
+            <button id="dashboardTabButton" type="button" class="workspace-tab" role="tab" aria-label="لوحة المتابعة" aria-selected="true" aria-controls="dashboardMetricsPanel dashboardAnalyticsPanel" tabindex="0" data-workspace-tab="dashboard" data-mobile-label="الرئيسية"><i class="fa-solid fa-chart-line" aria-hidden="true"></i><span>لوحة المتابعة</span></button>
+            <button id="itemsTabButton" type="button" class="workspace-tab" role="tab" aria-label="الأصناف والأرصدة" aria-selected="false" aria-controls="itemsWorkspacePanel newItemWorkspacePanel" tabindex="-1" data-workspace-tab="items" data-mobile-label="الأصناف"><i class="fa-solid fa-boxes-stacked" aria-hidden="true"></i><span>الأصناف والأرصدة</span></button>
+            <button id="movementsTabButton" type="button" class="workspace-tab" role="tab" aria-label="الحركات والأذونات" aria-selected="false" aria-controls="movementWorkspacePanel movementRegisterPanel" tabindex="-1" data-workspace-tab="movements" data-mobile-label="الحركات"><i class="fa-solid fa-arrow-right-arrow-left" aria-hidden="true"></i><span>الحركات والأذونات</span></button>
+            <button id="reportsTabButton" type="button" class="workspace-tab" role="tab" aria-label="التقارير" aria-selected="false" aria-controls="reportsWorkspacePanel" tabindex="-1" data-workspace-tab="reports" data-mobile-label="التقارير"><i class="fa-solid fa-file-contract" aria-hidden="true"></i><span>التقارير</span></button>
+            <button id="adminTabButton" type="button" class="workspace-tab hidden" role="tab" aria-label="إدارة النظام" aria-selected="false" aria-controls="adminWorkspacePanel" tabindex="-1" data-workspace-tab="admin" data-mobile-label="الإدارة"><i class="fa-solid fa-user-shield" aria-hidden="true"></i><span>الإدارة</span></button>
+        </div>
+    </nav>
+
+    <main id="warehouseWorkspace" class="warehouse-workspace multitab-workspace flex-grow max-w-7xl w-full mx-auto p-4 md:p-6 grid gap-6">
 
         <!-- العمود الأيمن -->
-        <div class="lg:col-span-2 flex flex-col gap-6">
+        <div class="multitab-layout-group">
 
             <!-- KPI Cards -->
-            <div class="metrics-grid grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div id="dashboardMetricsPanel" class="metrics-grid grid grid-cols-2 md:grid-cols-4 gap-4" role="tabpanel" aria-labelledby="dashboardTabButton" data-workspace-panel="dashboard">
                 <div class="metric-card text-brand-neon p-4 rounded-2xl border flex items-center gap-4">
                     <div class="bg-brand-neon/10 p-3 rounded-xl text-brand-neon">
                         <i class="fa-solid fa-tags text-xl"></i>
@@ -391,7 +448,7 @@
             </div>
 
             <!-- Chart & Alert -->
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div id="dashboardAnalyticsPanel" class="grid grid-cols-1 md:grid-cols-2 gap-6" role="tabpanel" aria-labelledby="dashboardTabButton" data-workspace-panel="dashboard">
                 <div class="workspace-panel p-5 rounded-2xl border flex flex-col">
                     <div class="flex items-center justify-between mb-4">
                         <h3 class="section-heading text-sm font-bold text-white"><i class="fa-solid fa-chart-simple text-brand-neon ml-2"></i>أعلى أرصدة المخزون</h3>
@@ -413,7 +470,7 @@
             </div>
 
             <!-- جدول الأرصدة -->
-            <div class="workspace-panel workspace-panel--primary p-5 md:p-6 rounded-3xl border">
+            <div id="itemsWorkspacePanel" class="workspace-panel workspace-panel--primary p-5 md:p-6 rounded-3xl border" role="tabpanel" aria-labelledby="itemsTabButton" data-workspace-panel="items" hidden>
                 <div class="flex flex-col gap-4 mb-6">
                     <div>
                         <h3 class="section-heading text-lg font-bold text-white"><i class="fa-solid fa-cubes text-brand-neon ml-2"></i>سجل الأصناف والأرصدة</h3>
@@ -424,7 +481,7 @@
                         <label class="toolbar-field"><span>الجهة المالكة</span><select id="itemOwnerFilter" onchange="filterItemsTable()" class="bg-brand-navy border border-gray-700 rounded-xl px-3 py-2 text-xs text-white"><option value="">جميع الجهات</option></select></label>
                         <label class="toolbar-field"><span>حالة المخزون</span><select id="itemStatusFilter" onchange="filterItemsTable()" class="bg-brand-navy border border-gray-700 rounded-xl px-3 py-2 text-xs text-white"><option value="ALL">جميع الحالات</option><option value="AVAILABLE">متوفر</option><option value="LOW">منخفض</option><option value="OUT">نافد</option><option value="INACTIVE">موقوف</option></select></label>
                         <label class="toolbar-field toolbar-search"><span>البحث في الأصناف</span><span class="relative block"><i class="fa-solid fa-magnifying-glass absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm" aria-hidden="true"></i><input type="search" id="itemSearchInput" oninput="filterItemsTable()" placeholder="اسم الصنف أو الكود" class="bg-brand-navy border border-gray-700 rounded-xl pr-10 pl-4 py-2 text-xs w-full text-white focus:outline-none focus:border-brand-neon focus:ring-1 focus:ring-brand-neon"></span></label>
-                        <label class="toolbar-field"><span>عدد الصفوف</span><select id="itemPageSizeSelect" onchange="changeItemPageSize(this.value)" class="bg-brand-navy border border-gray-700 rounded-xl px-3 py-2 text-xs text-white"><option value="10" selected>10</option><option value="25">25</option><option value="50">50</option></select></label>
+                        <label class="toolbar-field"><span>عدد الصفوف</span><select id="itemPageSizeSelect" onchange="changeItemPageSize(this.value)" class="bg-brand-navy border border-gray-700 rounded-xl px-3 py-2 text-xs text-white"><option value="20" selected>20</option><option value="50">50</option><option value="100">100</option></select></label>
                         <button onclick="exportInventoryToCSV()" class="inventory-export-action min-h-11 bg-gray-800 hover:bg-gray-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl border border-gray-700 transition-all inline-flex items-center justify-center gap-1.5 whitespace-nowrap"><i class="fa-solid fa-file-excel text-brand-emerald" aria-hidden="true"></i>تصدير سجل الأرصدة</button>
                     </div>
                 </div>
@@ -453,10 +510,10 @@
         </div>
 
         <!-- العمود الأيسر -->
-        <div class="flex flex-col gap-6">
+        <div class="multitab-layout-group">
 
             <!-- واجهة إدخال / تعديل حركة مخزنية -->
-            <div class="workspace-panel workspace-panel--primary p-5 md:p-6 rounded-3xl border relative overflow-hidden">
+            <div id="movementWorkspacePanel" class="workspace-panel workspace-panel--primary p-5 md:p-6 rounded-3xl border relative overflow-hidden" role="tabpanel" aria-labelledby="movementsTabButton" data-workspace-panel="movements" hidden>
                 <div class="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-l from-brand-neon to-brand-emerald"></div>
                 <div class="mb-5 flex justify-between items-center">
                     <div>
@@ -535,7 +592,7 @@
             </div>
 
             <!-- واجهة تسجيل صنف جديد -->
-            <div class="workspace-panel p-5 md:p-6 rounded-3xl border">
+            <div id="newItemWorkspacePanel" class="workspace-panel p-5 md:p-6 rounded-3xl border" role="tabpanel" aria-labelledby="itemsTabButton" data-workspace-panel="items" hidden>
                 <div class="mb-5 flex items-center justify-between">
                     <div>
                         <h3 id="newItemFormTitle" class="section-heading text-sm font-bold text-white"><i class="fa-solid fa-circle-plus text-brand-emerald ml-2"></i>إضافة صنف جديد</h3>
@@ -589,7 +646,7 @@
     </main>
 
     <!-- سجل الحركات والتدقيق الفوري -->
-    <section class="max-w-7xl w-full mx-auto p-4 md:p-6 mb-12">
+    <section id="movementRegisterPanel" class="workspace-view-section" role="tabpanel" aria-labelledby="movementsTabButton" data-workspace-panel="movements" hidden>
         <div class="workspace-panel p-5 md:p-6 rounded-3xl border">
             <div class="mb-5">
                 <div>
@@ -651,6 +708,43 @@
                 </table>
             </div>
             <div id="movementsPagination" class="pagination-bar"></div>
+        </div>
+    </section>
+
+    <section id="reportsWorkspacePanel" class="workspace-view-section" role="tabpanel" aria-labelledby="reportsTabButton" data-workspace-panel="reports" hidden>
+        <div class="workspace-view-heading">
+            <div><h2 class="section-heading text-xl font-bold text-white">مركز التقارير والتصدير</h2><p>تقارير رسمية وملفات CSV حسب فلاتر الأصناف والحركات المحددة في النظام.</p></div>
+        </div>
+        <div class="report-hub-grid">
+            <article class="report-action-card">
+                <h3><i class="fa-solid fa-boxes-stacked text-brand-neon ml-2" aria-hidden="true"></i>تقارير الأصناف والأرصدة</h3>
+                <p class="section-description text-xs mt-2">المعاينة الإدارية الرسمية وتصدير كامل سجل الأرصدة المطابق لفلاتر الأصناف.</p>
+                <div class="report-actions">
+                    <button type="button" onclick="openReportPreview()"><i class="fa-solid fa-file-pdf text-brand-crimson" aria-hidden="true"></i>التقرير الإداري الرسمي</button>
+                    <button type="button" onclick="exportInventoryToCSV()"><i class="fa-solid fa-file-excel text-brand-emerald" aria-hidden="true"></i>تصدير الأرصدة CSV</button>
+                    <button type="button" onclick="switchWorkspaceTab('items')"><i class="fa-solid fa-sliders text-brand-neon" aria-hidden="true"></i>ضبط فلاتر الأصناف</button>
+                </div>
+            </article>
+            <article class="report-action-card">
+                <h3><i class="fa-solid fa-arrow-right-arrow-left text-brand-amber ml-2" aria-hidden="true"></i>تقارير الحركات والأذونات</h3>
+                <p class="section-description text-xs mt-2">تقرير PDF للحركات المفلترة، سجل CSV، وملخص الإجماليات والأرصدة المتبقية.</p>
+                <div class="report-actions">
+                    <button type="button" onclick="openFilteredMovementPDF()"><i class="fa-solid fa-file-pdf text-brand-crimson" aria-hidden="true"></i>PDF الحركات</button>
+                    <button type="button" onclick="exportToCSV()"><i class="fa-solid fa-file-excel text-brand-emerald" aria-hidden="true"></i>الحركات CSV</button>
+                    <button type="button" onclick="exportMovementTotalsCSV()"><i class="fa-solid fa-calculator text-brand-amber" aria-hidden="true"></i>ملخص الأرصدة CSV</button>
+                    <button type="button" onclick="switchWorkspaceTab('movements')"><i class="fa-solid fa-sliders text-brand-neon" aria-hidden="true"></i>ضبط فلاتر الحركات</button>
+                </div>
+            </article>
+        </div>
+    </section>
+
+    <section id="adminWorkspacePanel" class="workspace-view-section" role="tabpanel" aria-labelledby="adminTabButton" data-workspace-panel="admin" hidden>
+        <div class="workspace-view-heading">
+            <div><h2 class="section-heading text-xl font-bold text-white">إدارة النظام والصلاحيات</h2><p>أدوات المدير لإدارة المستخدمين، كلمات المرور، والنسخ الاحتياطية.</p></div>
+        </div>
+        <div class="admin-hub-grid">
+            <article class="admin-action-card"><span class="admin-action-card__icon"><i class="fa-solid fa-users-gear" aria-hidden="true"></i></span><h3>المستخدمون والأدوار</h3><p class="section-description text-xs mt-2">إضافة المستخدمين وتحديد دور المدير أو أمين المخزن أو المدقق.</p><div class="admin-actions"><button type="button" onclick="openUsersModal()"><i class="fa-solid fa-user-gear text-brand-neon" aria-hidden="true"></i>فتح إدارة المستخدمين</button></div></article>
+            <article class="admin-action-card"><span class="admin-action-card__icon"><i class="fa-solid fa-cloud-arrow-down" aria-hidden="true"></i></span><h3>النسخ الاحتياطية</h3><p class="section-description text-xs mt-2">تحديد مجلد Drive وإنشاء نسخة احتياطية كاملة بصيغة Excel.</p><div class="admin-actions"><button type="button" onclick="openBackupModal()"><i class="fa-solid fa-file-excel text-brand-emerald" aria-hidden="true"></i>إدارة نسخ Excel</button></div></article>
         </div>
     </section>
 

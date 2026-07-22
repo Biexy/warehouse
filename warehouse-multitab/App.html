@@ -5,11 +5,12 @@
   var SESSION_KEY = 'warehouse.session.same-tab.v2';
   var state = {
     token: '', user: null, permissions: {}, dashboard: null, passwordChangeRequired: false,
-    items: [], itemPage: 1, itemPageSize: 10, itemTotal: 0, owners: [],
+    items: [], itemPage: 1, itemPageSize: 20, itemTotal: 0, owners: [],
     movements: [], movementPage: 1, movementPageSize: 25, movementTotal: 0,
     catalog: [], correctionCatalog: [], editingItem: null, editingMovement: null, activeItem: null,
     users: [], stockChart: null, requestIds: Object.create(null),
-    catalogImportCompleted: false, itemEditReturnFocus: null, movementCorrectionReturnFocus: null, reportReturnFocus: null
+    catalogImportCompleted: false, itemEditReturnFocus: null, movementCorrectionReturnFocus: null, reportReturnFocus: null,
+    activeTab: 'dashboard'
   };
 
   function el(id) { return document.getElementById(id); }
@@ -89,10 +90,14 @@
     el('activeOperatorBadge').textContent = data.user.displayName;
     el('adminUsersButton').classList.toggle('hidden', !state.permissions.canManageUsers);
     el('backupButton').classList.toggle('hidden', !state.permissions.canCreateBackups);
+    var isAdministrator = data.user.role === 'ADMIN';
+    el('adminTabButton').classList.toggle('hidden', !isAdministrator);
+    el('workspaceTabList').classList.toggle('workspace-tabs--admin', isAdministrator);
     el('newItemForm').parentElement.classList.toggle('hidden', !state.permissions.canManageItems);
     el('trxForm').parentElement.classList.toggle('hidden', !state.permissions.canCreateMovements);
     updateCatalogImportVisibility();
     el('warehouseApp').classList.remove('hidden'); el('loginView').classList.add('hidden');
+    switchWorkspaceTab(workspaceTabFromLocation(), { replace: true, scroll: false });
     populateOwners(); populateCatalog(state.catalog); setDefaultTrxDate(); applyDashboard(data.dashboard); setSyncStatus(true);
     state.passwordChangeRequired = Boolean(data.passwordChangeRequired);
     if (state.passwordChangeRequired) { showPasswordChangeModal_(true); return; }
@@ -216,7 +221,7 @@
   function changeItemPage(page) { state.itemPage = page; loadItems(); }
   function changeItemPageSize(value) {
     var pageSize = Number(value);
-    if ([10, 25, 50].indexOf(pageSize) === -1 || pageSize === state.itemPageSize) return;
+    if ([20, 50, 100].indexOf(pageSize) === -1 || pageSize === state.itemPageSize) return;
     state.itemPageSize = pageSize; state.itemPage = 1; loadItems();
   }
   function filterItemsTable() { state.itemPage = 1; debouncedItems(); }
@@ -243,7 +248,9 @@
   }
 
   function populateCatalog(items) {
-    state.catalog = items || []; var select = el('trxItem'), selected = select.value;
+    var select = el('trxItem'), selected = select.value, previousSelected = state.catalog.find(function (item) { return item.id === selected; });
+    state.catalog = (items || []).slice();
+    if (previousSelected && !state.catalog.some(function (item) { return item.id === previousSelected.id; })) state.catalog.unshift(previousSelected);
     select.innerHTML = '<option value="">اختر الصنف</option>' + state.catalog.filter(function (i) { return i.active !== false; }).map(function (item) { return '<option value="' + esc(item.id) + '">' + esc(item.name) + ' (' + esc(item.code) + ')</option>'; }).join('');
     select.value = selected; updateBalancePreview();
   }
@@ -476,16 +483,56 @@
       button.addEventListener('click', function () { filterInventoryByOwner(owner.owner || ''); }); node.appendChild(button);
     });
   }
-  function filterInventoryByOwner(owner) { el('itemOwnerFilter').value = owner; state.itemPage = 1; loadItems(); }
+  function filterInventoryByOwner(owner) { switchWorkspaceTab('items'); el('itemOwnerFilter').value = owner; state.itemPage = 1; loadItems(); }
   function renderChartVisualization(items){var canvas=el('stockLevelChart');if(!window.Chart||!canvas)return;var rows=(items||[]).slice(0,10);if(state.stockChart)state.stockChart.destroy();state.stockChart=new Chart(canvas,{type:'bar',data:{labels:rows.map(function(i){return i.code;}),datasets:[{label:'الرصيد الحالي',data:rows.map(function(i){return i.currentQuantity||0;}),backgroundColor:'#38bdf8'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#94a3b8'}},y:{beginAtZero:true,ticks:{color:'#94a3b8'}}}}});}
   async function refreshAll(){setSyncStatus(false);try{var d=await rpc('getDashboard',state.token,{days:30});state.dashboard=d;applyDashboard(d);await Promise.all([loadItems(),loadMovements(),searchCatalog()]);setSyncStatus(true);}catch(e){setSyncStatus(false,true);showToast(e.message,'error');}}
 
+  var WORKSPACE_TABS = ['dashboard', 'items', 'movements', 'reports', 'admin'];
+  function workspaceTabFromLocation() {
+    var tab = String(window.location.hash || '').replace(/^#/, '').toLowerCase();
+    return WORKSPACE_TABS.indexOf(tab) === -1 ? 'dashboard' : tab;
+  }
+  function canAccessWorkspaceTab(tab) { return tab !== 'admin' || Boolean(state.user && state.user.role === 'ADMIN'); }
+  function switchWorkspaceTab(tab, options) {
+    options = options || {};
+    if (WORKSPACE_TABS.indexOf(tab) === -1 || !canAccessWorkspaceTab(tab)) tab = 'dashboard';
+    var focusedPanel = document.activeElement && document.activeElement.closest ? document.activeElement.closest('[data-workspace-panel]') : null;
+    var moveFocusToTab = Boolean(focusedPanel && focusedPanel.dataset.workspacePanel !== tab);
+    state.activeTab = tab;
+    document.querySelectorAll('[data-workspace-panel]').forEach(function (panel) { panel.hidden = panel.dataset.workspacePanel !== tab; });
+    document.querySelectorAll('[data-workspace-tab]').forEach(function (button) {
+      var active = button.dataset.workspaceTab === tab;
+      button.setAttribute('aria-selected', String(active)); button.tabIndex = active ? 0 : -1;
+    });
+    el('warehouseWorkspace').hidden = tab === 'reports' || tab === 'admin';
+    if (options.replace) history.replaceState(null, '', '#' + tab);
+    else if (window.location.hash !== '#' + tab) history.pushState(null, '', '#' + tab);
+    if (moveFocusToTab) {
+      var targetTabButton = document.querySelector('[data-workspace-tab="' + tab + '"]');
+      if (targetTabButton) targetTabButton.focus({preventScroll:true});
+    }
+    if (options.scroll !== false) {
+      var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      window.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' });
+    }
+    if (tab === 'dashboard' && state.stockChart) requestAnimationFrame(function () { state.stockChart.resize(); });
+  }
+  function handleWorkspaceTabKeydown(event) {
+    if (['ArrowRight','ArrowLeft','Home','End'].indexOf(event.key) === -1) return;
+    var buttons = Array.prototype.slice.call(document.querySelectorAll('[data-workspace-tab]')).filter(function (button) { return !button.classList.contains('hidden'); });
+    var index = buttons.indexOf(event.currentTarget); if (index < 0) return; event.preventDefault();
+    if (event.key === 'Home') index = 0;
+    else if (event.key === 'End') index = buttons.length - 1;
+    else index = (index + (event.key === 'ArrowLeft' ? 1 : -1) + buttons.length) % buttons.length;
+    buttons[index].focus(); switchWorkspaceTab(buttons[index].dataset.workspaceTab);
+  }
+
   function releaseManagedModalScroll() {
-    var passwordHelpOpen = !el('passwordHelpModal').classList.contains('hidden');
     var itemOpen = !el('itemEditModal').classList.contains('hidden');
     var correctionOpen = !el('movementCorrectionModal').classList.contains('hidden');
     var reportOpen = !el('reportPreviewModal').classList.contains('hidden');
-    if (!passwordHelpOpen && !itemOpen && !correctionOpen && !reportOpen) document.body.classList.remove('overflow-hidden');
+    var passwordHelpOpen = !el('passwordHelpModal').classList.contains('hidden');
+    if (!itemOpen && !correctionOpen && !reportOpen && !passwordHelpOpen) document.body.classList.remove('overflow-hidden');
   }
   function handleManagedModalKeydown(event) {
     var modal = !el('passwordHelpModal').classList.contains('hidden') ? el('passwordHelpModal') : !el('movementCorrectionModal').classList.contains('hidden') ? el('movementCorrectionModal') : !el('itemEditModal').classList.contains('hidden') ? el('itemEditModal') : !el('reportPreviewModal').classList.contains('hidden') ? el('reportPreviewModal') : null;
@@ -509,11 +556,12 @@
     el('loginForm').addEventListener('submit',handleLogin);el('trxItemSearch').addEventListener('input',debouncedCatalog);el('trxItem').addEventListener('change',updateBalancePreview);el('trxQty').addEventListener('input',updateBalancePreview);el('correctionItemSearch').addEventListener('input',debouncedCorrectionCatalog);document.querySelectorAll('input[name="trxType"]').forEach(function(r){r.addEventListener('change',updateBalancePreview);});
     document.querySelectorAll('[data-password-toggle]').forEach(function(button){button.addEventListener('click',function(){var input=el(button.dataset.passwordToggle);input.type=input.type==='password'?'text':'password';button.querySelector('i').className=input.type==='password'?'fa-solid fa-eye':'fa-solid fa-eye-slash';});});
     el('passwordHelpModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closePasswordHelp();});el('itemEditModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closeItemEditModal();});el('movementCorrectionModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closeMovementCorrectionModal();});el('reportPreviewModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closeReportPreview();});document.addEventListener('keydown',handleManagedModalKeydown);
-
+    document.querySelectorAll('[data-workspace-tab]').forEach(function(button){button.addEventListener('click',function(){switchWorkspaceTab(button.dataset.workspaceTab);});button.addEventListener('keydown',handleWorkspaceTabKeydown);});
+    window.addEventListener('popstate',function(){if(state.user)switchWorkspaceTab(workspaceTabFromLocation(),{replace:true,scroll:false});});
     window.openPasswordChangeModal = openPasswordChangeModal; window.cancelPasswordChange = cancelPasswordChange; window.retryBootstrap = retryBootstrap; window.loginWithAnotherAccount = loginWithAnotherAccount;
     validateOrLogin();
   });
 
-  Object.assign(window,{handleLogout:handleLogout,confirmUserSwitch:confirmUserSwitch,openPasswordHelp:openPasswordHelp,closePasswordHelp:closePasswordHelp,filterItemsTable:filterItemsTable,changeItemPageSize:changeItemPageSize,filterAuditTrailTable:filterAuditTrailTable,handleTransactionSubmit:handleTransactionSubmit,editTrx:editTrx,cancelEditTrx:cancelEditTrx,handleMovementCorrectionSubmit:handleMovementCorrectionSubmit,closeMovementCorrectionModal:closeMovementCorrectionModal,deleteTrx:deleteTrx,handleNewItemSubmit:handleNewItemSubmit,handleItemEditSubmit:handleItemEditSubmit,editItem:editItem,cancelEditItem:cancelEditItem,closeItemEditModal:closeItemEditModal,deleteItem:deleteItem,importCatalog:importCatalog,openItemDetailModal:openItemDetailModal,closeItemModal:closeItemModal,printSingleItemReport:printSingleItemReport,openReportPreview:openReportPreview,openFilteredMovementPDF:openFilteredMovementPDF,closeReportPreview:closeReportPreview,triggerPrintPDF:triggerPrintPDF,exportInventoryToCSV:exportInventoryToCSV,exportToCSV:exportToCSV,exportMovementTotalsCSV:exportMovementTotalsCSV,openUsersModal:openUsersModal,closeUsersModal:closeUsersModal,handleUserSubmit:handleUserSubmit,editUser:editUser,resetUserAccess:resetUserAccess,openBackupModal:openBackupModal,closeBackupModal:closeBackupModal,configureBackup:configureBackup,createExcelBackup:createExcelBackup,showCustomConfirm:showCustomConfirm,closeConfirmModal:closeConfirmModal,showToast:showToast});
+  Object.assign(window,{switchWorkspaceTab:switchWorkspaceTab,handleLogout:handleLogout,confirmUserSwitch:confirmUserSwitch,openPasswordHelp:openPasswordHelp,closePasswordHelp:closePasswordHelp,filterItemsTable:filterItemsTable,changeItemPageSize:changeItemPageSize,filterAuditTrailTable:filterAuditTrailTable,handleTransactionSubmit:handleTransactionSubmit,editTrx:editTrx,cancelEditTrx:cancelEditTrx,handleMovementCorrectionSubmit:handleMovementCorrectionSubmit,closeMovementCorrectionModal:closeMovementCorrectionModal,deleteTrx:deleteTrx,handleNewItemSubmit:handleNewItemSubmit,handleItemEditSubmit:handleItemEditSubmit,editItem:editItem,cancelEditItem:cancelEditItem,closeItemEditModal:closeItemEditModal,deleteItem:deleteItem,importCatalog:importCatalog,openItemDetailModal:openItemDetailModal,closeItemModal:closeItemModal,printSingleItemReport:printSingleItemReport,openReportPreview:openReportPreview,openFilteredMovementPDF:openFilteredMovementPDF,closeReportPreview:closeReportPreview,triggerPrintPDF:triggerPrintPDF,exportInventoryToCSV:exportInventoryToCSV,exportToCSV:exportToCSV,exportMovementTotalsCSV:exportMovementTotalsCSV,openUsersModal:openUsersModal,closeUsersModal:closeUsersModal,handleUserSubmit:handleUserSubmit,editUser:editUser,resetUserAccess:resetUserAccess,openBackupModal:openBackupModal,closeBackupModal:closeBackupModal,configureBackup:configureBackup,createExcelBackup:createExcelBackup,showCustomConfirm:showCustomConfirm,closeConfirmModal:closeConfirmModal,showToast:showToast});
 })();
 </script>

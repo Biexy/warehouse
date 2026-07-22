@@ -4,7 +4,18 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 
 const ROOT = new URL('../', import.meta.url);
-const BACKEND_FILES = ['Code.gs', 'Repository.gs', 'Auth.gs'];
+const BACKEND_FILES = ['Code.gs', 'Repository.gs', 'Auth.gs', 'Inventory.gs', 'CatalogImport.gs'];
+
+function dateKey(value, timeZone) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(new Date(value));
+  const byType = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${byType.year}-${byType.month}-${byType.day}`;
+}
 
 function signedBytes(buffer) {
   return [...buffer].map((value) => (value > 127 ? value - 256 : value));
@@ -247,6 +258,10 @@ function createHarness() {
     },
     base64EncodeWebSafe(value) {
       return bytesBuffer(value).toString('base64').replace(/\+/g, '-').replace(/\//g, '_');
+    },
+    formatDate(value, timeZone, pattern) {
+      assert.equal(pattern, 'yyyy-MM-dd', `Unsupported test date pattern: ${pattern}`);
+      return dateKey(value, timeZone);
     }
   };
 
@@ -328,6 +343,24 @@ function assertWarehouseError(callable, code) {
   assert.throws(callable, (error) => error && error.name === 'WarehouseError' && error.code === code);
 }
 
+function assertRpcSafeValue(value, path = 'data', seen = new Set()) {
+  if (typeof value === 'number') {
+    assert.ok(Number.isFinite(value), `${path} contains a non-finite number that cannot cross google.script.run safely`);
+    return;
+  }
+  if (value === null || value === undefined || typeof value === 'string' || typeof value === 'boolean') return;
+  assert.notEqual(Object.prototype.toString.call(value), '[object Date]', `${path} contains a Date instead of an RPC-safe string`);
+  if (typeof value !== 'object') assert.fail(`${path} contains unsupported RPC value ${typeof value}`);
+  if (seen.has(value)) assert.fail(`${path} contains a circular reference`);
+  seen.add(value);
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => assertRpcSafeValue(entry, `${path}[${index}]`, seen));
+  } else {
+    Object.entries(value).forEach(([key, entry]) => assertRpcSafeValue(entry, `${path}.${key}`, seen));
+  }
+  seen.delete(value);
+}
+
 function installAndSetPassword(password = 'N3w!Secure#Warehouse') {
   const harness = createHarness();
   initialize(harness);
@@ -403,6 +436,42 @@ const tests = [
     assertRpcError(harness.context.login('admin', setup.temporaryPassword), 'INVALID_CREDENTIALS');
     const recoveredLogin = assertOk(harness.context.login('admin', recovery.temporaryPassword));
     assert.equal(recoveredLogin.user.forcePasswordChange, true);
+  }],
+
+  ['administrator recovery survives password change, relogin, and full catalog bootstrap', () => {
+    const harness = createHarness();
+    const setup = initialize(harness);
+    const initialLogin = assertOk(harness.context.login('admin', setup.temporaryPassword));
+    assertOk(harness.context.changeMyPassword(initialLogin.token, {
+      currentPassword: setup.temporaryPassword,
+      newPassword: 'BeforeRecovery123'
+    }));
+    const catalogLogin = assertOk(harness.context.login('admin', 'BeforeRecovery123'));
+    const imported = assertOk(harness.context.importProvidedCatalog(catalogLogin.token));
+    assert.equal(imported.catalogTotal, 76);
+    assert.equal(imported.completed, true);
+
+    const recovery = harness.context.recoverAdministratorAccessFromSheet();
+    assert.equal(recovery.recovered, true);
+    const temporaryLogin = assertOk(harness.context.login('admin', recovery.temporaryPassword));
+    const forcedBootstrap = assertOk(harness.context.getBootstrap(temporaryLogin.token), 'temporary recovery session must bootstrap');
+    assert.equal(forcedBootstrap.passwordChangeRequired, true);
+    assert.equal(forcedBootstrap.items.length, 0);
+
+    assertOk(harness.context.changeMyPassword(temporaryLogin.token, {
+      currentPassword: recovery.temporaryPassword,
+      newPassword: 'AfterRecovery123'
+    }));
+    const permanentLogin = assertOk(harness.context.login('admin', 'AfterRecovery123'));
+    assert.equal(permanentLogin.user.forcePasswordChange, false);
+    const bootstrap = assertOk(harness.context.getBootstrap(permanentLogin.token), 'post-recovery getBootstrap must succeed');
+    assert.equal(bootstrap.passwordChangeRequired, false);
+    assert.equal(bootstrap.dashboard.summary.totalItems, 76);
+    assert.equal(bootstrap.itemCatalog.total, 76);
+    assert.equal(bootstrap.itemCatalog.returned, 50);
+    assert.equal(bootstrap.dashboard.stockStatusCounts.AVAILABLE, 76);
+    assert.equal(Object.hasOwn(bootstrap.dashboard.stockStatusCounts, 'OK'), false);
+    assertRpcSafeValue(bootstrap, 'getBootstrap.data');
   }],
 
   ['password change invalidates other sessions, and logout removes its session', () => {

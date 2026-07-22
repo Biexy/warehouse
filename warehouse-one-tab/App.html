@@ -4,7 +4,7 @@
 
   var SESSION_KEY = 'warehouse.session.same-tab.v2';
   var state = {
-    token: '', user: null, permissions: {}, dashboard: null,
+    token: '', user: null, permissions: {}, dashboard: null, passwordChangeRequired: false,
     items: [], itemPage: 1, itemPageSize: 10, itemTotal: 0, owners: [],
     movements: [], movementPage: 1, movementPageSize: 25, movementTotal: 0,
     catalog: [], correctionCatalog: [], editingItem: null, editingMovement: null, activeItem: null,
@@ -64,7 +64,7 @@
 
   function clearSession(showLogin) {
     try { sessionStorage.removeItem(SESSION_KEY); } catch (ignored) {}
-    state.token = ''; state.user = null;
+    state.token = ''; state.user = null; state.passwordChangeRequired = false;
     el('loginAuthModal').classList.add('hidden'); el('passwordChangeForm').reset(); el('passwordChangeError').classList.add('hidden');
     el('warehouseApp').classList.add('hidden'); el('startupState').classList.add('hidden');
     if (showLogin !== false) el('loginView').classList.remove('hidden');
@@ -74,8 +74,11 @@
     var token = ''; try { token = sessionStorage.getItem(SESSION_KEY) || ''; } catch (ignored) {}
     if (!token) return clearSession(true);
     el('loginView').classList.add('hidden'); el('startupState').classList.remove('hidden'); state.token = token;
-    try { await bootstrap(); } catch (error) { clearSession(true); showError('loginError', error); }
-    finally { el('startupState').classList.add('hidden'); }
+    try { await bootstrap(); el('startupState').classList.add('hidden'); }
+    catch (error) {
+      if (!state.token) return;
+      showBootstrapFailure_(error);
+    }
   }
 
   async function bootstrap() {
@@ -91,18 +94,50 @@
     updateCatalogImportVisibility();
     el('warehouseApp').classList.remove('hidden'); el('loginView').classList.add('hidden');
     populateOwners(); populateCatalog(state.catalog); setDefaultTrxDate(); applyDashboard(data.dashboard); setSyncStatus(true);
-    if (data.passwordChangeRequired) { el('loginAuthModal').classList.remove('hidden'); return; }
+    state.passwordChangeRequired = Boolean(data.passwordChangeRequired);
+    if (state.passwordChangeRequired) { showPasswordChangeModal_(true); return; }
     el('loginAuthModal').classList.add('hidden');
     await Promise.all([loadItems(), loadMovements()]);
   }
 
   async function handleLogin(event) {
     event.preventDefault(); var button = el('loginSubmit'); el('loginError').classList.add('hidden'); busy(button, true, 'جارٍ التحقق…');
+    var result;
     try {
-      var result = await rpc('authenticate', { username: el('loginUsername').value.trim(), password: el('loginPassword').value });
-      state.token = result.token; sessionStorage.setItem(SESSION_KEY, result.token); el('loginPassword').value = ''; await bootstrap();
-    } catch (error) { showError('loginError', error); } finally { busy(button, false); }
+      result = await rpc('authenticate', { username: el('loginUsername').value.trim(), password: el('loginPassword').value });
+    } catch (error) {
+      showError('loginError', error); busy(button, false); return;
+    }
+    state.token = result.token;
+    try { sessionStorage.setItem(SESSION_KEY, result.token); } catch (ignored) { showToast('تم الدخول، لكن المتصفح لم يسمح بحفظ الجلسة بعد إغلاق الصفحة.', 'warning'); }
+    el('loginPassword').value = ''; el('loginView').classList.add('hidden'); showBootstrapLoading_();
+    try { await bootstrap(); el('startupState').classList.add('hidden'); }
+    catch (error) { if (state.token) showBootstrapFailure_(error); }
+    finally { busy(button, false); }
   }
+
+  function showBootstrapLoading_() {
+    el('startupState').classList.remove('hidden');
+    el('startupSpinner').classList.remove('hidden');
+    el('startupMessage').textContent = 'جارٍ التحقق من الجلسة وتحميل البيانات…';
+    el('startupErrorCode').textContent = '';
+    el('startupErrorCode').classList.add('hidden');
+    el('startupActions').classList.add('hidden');
+  }
+  function showBootstrapFailure_(error) {
+    el('warehouseApp').classList.add('hidden'); el('loginView').classList.add('hidden'); el('startupState').classList.remove('hidden');
+    el('startupSpinner').classList.add('hidden');
+    el('startupMessage').textContent = 'تم تسجيل الدخول بنجاح، لكن تعذر تحميل بيانات المخزون. أعد المحاولة دون إدخال كلمة المرور مرة أخرى.';
+    el('startupErrorCode').textContent = (error && error.message ? error.message : 'تعذر تحميل البيانات.') + (error && error.code ? ' · ' + error.code : '');
+    el('startupErrorCode').classList.remove('hidden'); el('startupActions').classList.remove('hidden');
+  }
+  async function retryBootstrap() {
+    if (!state.token) return clearSession(true);
+    showBootstrapLoading_();
+    try { await bootstrap(); el('startupState').classList.add('hidden'); }
+    catch (error) { if (state.token) showBootstrapFailure_(error); }
+  }
+  function loginWithAnotherAccount() { handleLogout(); }
 
   async function handleLogout() {
     var token = state.token; clearSession(true); if (token) try { await rpc('logout', token); } catch (ignored) {}
@@ -116,6 +151,19 @@
       await rpc('changeMyPassword', state.token, { currentPassword: el('authPasswordInput').value, newPassword: el('newPasswordInput').value });
       el('loginAuthModal').classList.add('hidden'); showToast('تم تغيير كلمة المرور. سجّل الدخول مجدداً.', 'success'); clearSession(true);
     } catch (error) { showError(errorNode, error); } finally { busy(button, false); }
+  }
+
+  function showPasswordChangeModal_(required) {
+    state.passwordChangeRequired = Boolean(required);
+    el('passwordChangeForm').reset(); el('passwordChangeError').classList.add('hidden');
+    el('loginTargetUserLabel').textContent = required ? 'غيّر كلمة المرور المؤقتة قبل متابعة العمل.' : 'استخدم كلمة المرور الحالية لتعيين كلمة مرور جديدة.';
+    el('passwordChangeCancelButton').textContent = required ? 'خروج' : 'إلغاء';
+    el('loginAuthModal').classList.remove('hidden'); el('authPasswordInput').focus();
+  }
+  function openPasswordChangeModal() { showPasswordChangeModal_(false); }
+  function cancelPasswordChange() {
+    if (state.passwordChangeRequired) return handleLogout();
+    el('loginAuthModal').classList.add('hidden'); el('passwordChangeForm').reset(); el('passwordChangeError').classList.add('hidden');
   }
 
   function applyDashboard(dashboard) {
@@ -433,11 +481,11 @@
   async function refreshAll(){setSyncStatus(false);try{var d=await rpc('getDashboard',state.token,{days:30});state.dashboard=d;applyDashboard(d);await Promise.all([loadItems(),loadMovements(),searchCatalog()]);setSyncStatus(true);}catch(e){setSyncStatus(false,true);showToast(e.message,'error');}}
 
   function releaseManagedModalScroll() {
+    var passwordHelpOpen = !el('passwordHelpModal').classList.contains('hidden');
     var itemOpen = !el('itemEditModal').classList.contains('hidden');
     var correctionOpen = !el('movementCorrectionModal').classList.contains('hidden');
     var reportOpen = !el('reportPreviewModal').classList.contains('hidden');
-    var passwordHelpOpen = !el('passwordHelpModal').classList.contains('hidden');
-    if (!itemOpen && !correctionOpen && !reportOpen && !passwordHelpOpen) document.body.classList.remove('overflow-hidden');
+    if (!passwordHelpOpen && !itemOpen && !correctionOpen && !reportOpen) document.body.classList.remove('overflow-hidden');
   }
   function handleManagedModalKeydown(event) {
     var modal = !el('passwordHelpModal').classList.contains('hidden') ? el('passwordHelpModal') : !el('movementCorrectionModal').classList.contains('hidden') ? el('movementCorrectionModal') : !el('itemEditModal').classList.contains('hidden') ? el('itemEditModal') : !el('reportPreviewModal').classList.contains('hidden') ? el('reportPreviewModal') : null;
@@ -461,6 +509,8 @@
     el('loginForm').addEventListener('submit',handleLogin);el('trxItemSearch').addEventListener('input',debouncedCatalog);el('trxItem').addEventListener('change',updateBalancePreview);el('trxQty').addEventListener('input',updateBalancePreview);el('correctionItemSearch').addEventListener('input',debouncedCorrectionCatalog);document.querySelectorAll('input[name="trxType"]').forEach(function(r){r.addEventListener('change',updateBalancePreview);});
     document.querySelectorAll('[data-password-toggle]').forEach(function(button){button.addEventListener('click',function(){var input=el(button.dataset.passwordToggle);input.type=input.type==='password'?'text':'password';button.querySelector('i').className=input.type==='password'?'fa-solid fa-eye':'fa-solid fa-eye-slash';});});
     el('passwordHelpModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closePasswordHelp();});el('itemEditModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closeItemEditModal();});el('movementCorrectionModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closeMovementCorrectionModal();});el('reportPreviewModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closeReportPreview();});document.addEventListener('keydown',handleManagedModalKeydown);
+
+    window.openPasswordChangeModal = openPasswordChangeModal; window.cancelPasswordChange = cancelPasswordChange; window.retryBootstrap = retryBootstrap; window.loginWithAnotherAccount = loginWithAnotherAccount;
     validateOrLogin();
   });
 

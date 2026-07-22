@@ -3,7 +3,7 @@
 ## نسخ الواجهة
 
 - [`warehouse-one-tab`](warehouse-one-tab/README.md): النسخة الجاهزة ذات مساحة العمل الواحدة.
-- `warehouse-multitab`: النسخة متعددة التبويبات، تُضاف في الدفعة التالية.
+- [`warehouse-multitab`](warehouse-multitab/README.md): النسخة المنظمة في خمسة تبويبات، بنفس الباكند وقواعد العمل.
 
 تطبيق عربي RTL لإدارة المخزون والتدقيق، مبني كـ **Google Apps Script Web App**.
 قاعدة التشغيل الحية هي Google Sheets، ويمكن إنشاء نسخة Microsoft Excel بصيغة

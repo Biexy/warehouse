@@ -956,7 +956,12 @@ function dashboardFromSnapshot_(data) {
     activeItems += 1;
     totalCurrentQuantity += publicItem.currentQuantity;
     totalOpeningQuantity += item.openingQuantity;
-    counts[publicItem.stockStatus] += 1;
+    // Public item rows keep the historical healthy status `OK`, while the
+    // dashboard contract exposes that bucket as `AVAILABLE`. Never create an
+    // ad-hoc `OK` counter: incrementing an undefined bucket produces NaN,
+    // which Google Apps Script cannot serialize back to the browser.
+    var countStatus = publicItem.stockStatus === 'OK' ? 'AVAILABLE' : publicItem.stockStatus;
+    counts[countStatus] += 1;
     var owner = item.owner || 'غير محدد';
     if (!currentByOwner[owner]) {
       currentByOwner[owner] = { owner: owner, itemCount: 0, currentQuantity: 0, actionNeededCount: 0 };
