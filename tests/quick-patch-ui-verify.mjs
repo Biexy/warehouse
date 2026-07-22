@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
 
-const index = fs.readFileSync('Index.html', 'utf8');
-const app = fs.readFileSync('App.html', 'utf8');
+const index = fs.readFileSync('warehouse-one-tab/Index.html', 'utf8');
+const app = fs.readFileSync('warehouse-one-tab/App.html', 'utf8');
 
 assert.equal(index.includes('إصدار 2.5 الفني'), false, 'version badge must stay removed');
 assert.equal(index.includes('.overflow-x-auto > table { min-width: max-content; }'), false, 'global table overflow rule must stay removed');
@@ -48,9 +48,9 @@ assert.match(app, /state\.movementCorrectionReturnFocus/);
 
 for (const phrase of ['عرض</span>', 'تعديل</span>', 'إيقاف</span>']) assert.ok(app.includes(phrase), `missing labelled action: ${phrase}`);
 for (const phrase of ['التقرير الإداري والرقابي لجرد المخزون', 'نسخة معتمدة للاستعراض والتصدير', 'المراجعة والاعتماد الإداري', 'التوقيع والختم']) assert.ok(app.includes(phrase), `formal report missing: ${phrase}`);
-assert.match(app, /conflictingCodes/);
 assert.match(app, /reportItems\.reduce/);
-assert.match(app, /catalogImportCompleted/);
+assert.match(app, /previewItemFileImport/);
+assert.match(app, /commitItemFileImport/);
 assert.match(index, /responsive-card-table/);
 assert.match(index, /@media \(max-width: 640px\)/);
 assert.match(index, /login-help-button[^>]*onclick="[^"]*passwordHelpModal/, 'login reset-password link must have a direct modal fallback');

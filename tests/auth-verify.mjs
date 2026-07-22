@@ -3,8 +3,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const ROOT = new URL('../', import.meta.url);
-const BACKEND_FILES = ['Code.gs', 'Repository.gs', 'Auth.gs', 'Inventory.gs', 'CatalogImport.gs'];
+const ROOT = new URL('../warehouse-one-tab/', import.meta.url);
+const BACKEND_FILES = ['Code.gs', 'Repository.gs', 'Auth.gs', 'Inventory.gs', 'BulkImport.gs'];
 
 function dateKey(value, timeZone) {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -438,7 +438,7 @@ const tests = [
     assert.equal(recoveredLogin.user.forcePasswordChange, true);
   }],
 
-  ['administrator recovery survives password change, relogin, and full catalog bootstrap', () => {
+  ['administrator recovery survives password change, relogin, and inventory bootstrap', () => {
     const harness = createHarness();
     const setup = initialize(harness);
     const initialLogin = assertOk(harness.context.login('admin', setup.temporaryPassword));
@@ -446,10 +446,16 @@ const tests = [
       currentPassword: setup.temporaryPassword,
       newPassword: 'BeforeRecovery123'
     }));
-    const catalogLogin = assertOk(harness.context.login('admin', 'BeforeRecovery123'));
-    const imported = assertOk(harness.context.importProvidedCatalog(catalogLogin.token));
-    assert.equal(imported.catalogTotal, 76);
-    assert.equal(imported.completed, true);
+    const inventoryLogin = assertOk(harness.context.login('admin', 'BeforeRecovery123'));
+    assertOk(harness.context.saveItem(inventoryLogin.token, {
+      code: 'RECOVERY-001',
+      name: 'Recovery inventory item',
+      owner: 'Test owner',
+      unit: 'قطعة',
+      openingQuantity: 7,
+      reorderLevel: 2,
+      active: true
+    }));
 
     const recovery = harness.context.recoverAdministratorAccessFromSheet();
     assert.equal(recovery.recovered, true);
@@ -466,10 +472,10 @@ const tests = [
     assert.equal(permanentLogin.user.forcePasswordChange, false);
     const bootstrap = assertOk(harness.context.getBootstrap(permanentLogin.token), 'post-recovery getBootstrap must succeed');
     assert.equal(bootstrap.passwordChangeRequired, false);
-    assert.equal(bootstrap.dashboard.summary.totalItems, 76);
-    assert.equal(bootstrap.itemCatalog.total, 76);
-    assert.equal(bootstrap.itemCatalog.returned, 50);
-    assert.equal(bootstrap.dashboard.stockStatusCounts.AVAILABLE, 76);
+    assert.equal(bootstrap.dashboard.summary.totalItems, 1);
+    assert.equal(bootstrap.itemCatalog.total, 1);
+    assert.equal(bootstrap.itemCatalog.returned, 1);
+    assert.equal(bootstrap.dashboard.stockStatusCounts.AVAILABLE, 1);
     assert.equal(Object.hasOwn(bootstrap.dashboard.stockStatusCounts, 'OK'), false);
     assertRpcSafeValue(bootstrap, 'getBootstrap.data');
   }],

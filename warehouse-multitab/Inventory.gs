@@ -1309,8 +1309,7 @@ function publicSettings_() {
   return {
     systemName: getSettingValue_('SYSTEM_NAME') || WAREHOUSE_CONFIG_.APP_NAME,
     backupConfigured: !!getSettingValue_('BACKUP_FOLDER_ID'),
-    schemaVersion: getSettingValue_('SCHEMA_VERSION') || WAREHOUSE_CONFIG_.SCHEMA_VERSION,
-    catalogImportCompleted: catalogImportCompleted_()
+    schemaVersion: getSettingValue_('SCHEMA_VERSION') || WAREHOUSE_CONFIG_.SCHEMA_VERSION
   };
 }
 

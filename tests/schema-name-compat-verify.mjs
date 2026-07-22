@@ -7,7 +7,7 @@ function WarehouseError_(code, message, details) {
   this.details = details;
 }
 
-const repositorySource = fs.readFileSync('Repository.gs', 'utf8');
+const repositorySource = fs.readFileSync('warehouse-one-tab/Repository.gs', 'utf8');
 const api = new Function('WarehouseError_', `${repositorySource}\nreturn { schema: REPOSITORY_SCHEMA_, migrate: migrateSchemaSheetNames_, assertNoConflicts: assertNoSchemaSheetNameConflicts_ };`)(WarehouseError_);
 
 function workbook(names) {

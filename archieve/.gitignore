@@ -1,9 +1,0 @@
-.clasp.json
-.env
-node_modules/
-coverage/
-dist/
-*.log
-*.xlsx
-*.xls
-

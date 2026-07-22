@@ -5,7 +5,7 @@ import path from 'node:path';
 const variants = ['warehouse-one-tab', 'warehouse-multitab'];
 const backendFiles = [
   'appsscript.json', 'Code.gs', 'Auth.gs', 'Repository.gs', 'Inventory.gs',
-  'CatalogImport.gs', 'Export.gs'
+  'BulkImport.gs', 'Export.gs'
 ];
 const uiFiles = ['Index.html', 'App.html'];
 const runtimeFiles = [...backendFiles, ...uiFiles];
@@ -24,12 +24,6 @@ for (const variant of variants) {
     assert.ok(claspIgnore.includes(`!${file}`), `${variant}/.claspignore does not allow ${file}`);
   }
   assert.ok(fs.existsSync(path.join(variant, 'README.md')), `${variant} setup guide is missing`);
-}
-
-for (const file of runtimeFiles) {
-  const rootSource = fs.readFileSync(file);
-  const oneTabSource = fs.readFileSync(path.join('warehouse-one-tab', file));
-  assert.deepEqual(oneTabSource, rootSource, `warehouse-one-tab/${file} is not synchronized with the verified root source`);
 }
 
 for (const file of backendFiles) {

@@ -1,12 +1,13 @@
 import fs from 'node:fs';
 
-const backendFiles = ['Code.gs', 'Auth.gs', 'Repository.gs', 'Inventory.gs', 'CatalogImport.gs', 'Export.gs'];
-const backend = backendFiles.map((file) => fs.readFileSync(file, 'utf8')).join('\n');
-const index = fs.readFileSync('Index.html', 'utf8');
-const app = fs.readFileSync('App.html', 'utf8');
+const variant = 'warehouse-one-tab';
+const backendFiles = ['Code.gs', 'Auth.gs', 'Repository.gs', 'Inventory.gs', 'BulkImport.gs', 'Export.gs'];
+const backend = backendFiles.map((file) => fs.readFileSync(`${variant}/${file}`, 'utf8')).join('\n');
+const index = fs.readFileSync(`${variant}/Index.html`, 'utf8');
+const app = fs.readFileSync(`${variant}/App.html`, 'utf8');
 
 new Function(backend);
-JSON.parse(fs.readFileSync('appsscript.json', 'utf8'));
+JSON.parse(fs.readFileSync(`${variant}/appsscript.json`, 'utf8'));
 const scriptMatch = app.match(/<script>([\s\S]*?)<\/script>/);
 if (!scriptMatch) throw new Error('App.html script block is missing.');
 new Function(scriptMatch[1]);
@@ -45,7 +46,7 @@ for (const phrase of professionalWorkflowPhrases) if (!index.includes(phrase)) t
 
 const requiredAdditions = [
   'loginForm', 'logoutButton', 'trxCurrentBalance', 'trxProjectedBalance', 'newOwner',
-  'itemOwnerFilter', 'itemsPagination', 'movementsPagination', 'catalogImportButton',
+  'itemOwnerFilter', 'itemsPagination', 'movementsPagination', 'bulkImportButton', 'bulkImportModal',
   'backupModal', 'temporaryPasswordBox', 'itemEditForm', 'editItemCode', 'itemEditSubmitButton',
   'itemPageSizeSelect', 'movementCorrectionForm', 'correctionReason', 'movementCorrectionSubmitButton'
 ];
@@ -58,14 +59,14 @@ if (/defaultItems|defaultUsers|password:\s*["']123/.test(index + app)) throw new
 if (/ACTIVE_USER/.test(backend + app)) throw new Error('A global ACTIVE_USER property must never identify a session.');
 if (index.includes('إصدار 2.5 الفني')) throw new Error('The removed version badge returned.');
 if (!app.includes('dashboard.ownerSummary') || !app.includes('renderOwnerSummary')) throw new Error('Owner summary panel wiring is missing.');
-if (!app.includes('catalogImportCompleted') || !backend.includes('catalogImportCompleted')) throw new Error('Persistent catalog-completion state is missing.');
+if (app.includes('catalogImportCompleted') || backend.includes('importProvidedCatalog')) throw new Error('Legacy fixed catalog import is still present.');
 for (const phrase of ['التقرير الإداري والرقابي لجرد المخزون', 'نسخة معتمدة للاستعراض والتصدير', 'التوقيع والختم']) {
   if (!app.includes(phrase)) throw new Error(`Formal report content missing: ${phrase}`);
 }
 if (!/sessionStorage\.setItem\(SESSION_KEY/.test(app) || /localStorage/.test(app)) throw new Error('Same-tab session persistence is not enforced.');
 if (!/PASSWORD_MIN_LENGTH:\s*6/.test(backend)) throw new Error('Password minimum must remain six characters.');
 if (!backendFunctions.has('correctMovement') || !backendFunctions.has('reverseMovement')) throw new Error('Audited correction/reversal APIs are missing.');
-for (const fn of ['getInventoryReport', 'getMovementExport', 'createBackup', 'importProvidedCatalog']) {
+for (const fn of ['getInventoryReport', 'getMovementExport', 'createBackup', 'previewItemFileImport', 'commitItemFileImport']) {
   if (!backendFunctions.has(fn)) throw new Error(`Required backend capability missing: ${fn}`);
 }
 for (const role of ['ADMIN', 'STOREKEEPER', 'AUDITOR']) if (!backend.includes(`'${role}'`)) throw new Error(`Required role is missing: ${role}`);

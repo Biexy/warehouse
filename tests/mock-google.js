@@ -38,20 +38,6 @@
     { id: 'MOV-1042', timestamp: '2026-07-21T09:42:00.000Z', documentDate: '2026-07-21', type: 'OUT', itemId: 'ITM-2', itemCode: 'VALVE-204', itemName: 'صمام تحكم نحاسي', quantity: 2, balanceBefore: 5, balanceAfter: 3, party: 'قسم الصيانة', reference: 'ISS-884', notes: '', canReverse: true, reversed: false, actor: { username: 'admin', displayName: 'مدير النظام' } },
     { id: 'MOV-1041', timestamp: '2026-07-20T12:10:00.000Z', documentDate: '2026-07-20', type: 'IN', itemId: 'ITM-1', itemCode: 'PUMP-017', itemName: 'مضخة مياه صناعية', quantity: 4, balanceBefore: 8, balanceAfter: 12, party: 'المورد المحلي', reference: 'REC-332', notes: '', canReverse: true, reversed: false, actor: { username: 'admin', displayName: 'مدير النظام' } }
   ];
-  var catalogRegressionMode = new URLSearchParams(window.location.search).get('catalogRegression') === '1';
-  if (catalogRegressionMode) {
-    var savedRegressionState = window.sessionStorage.getItem('warehouse-catalog-regression-state-v1');
-    if (savedRegressionState) {
-      var parsedRegressionState = JSON.parse(savedRegressionState);
-      items.splice.apply(items, [0, items.length].concat(parsedRegressionState.items || []));
-      movements.splice.apply(movements, [0, movements.length].concat(parsedRegressionState.movements || []));
-    } else {
-      items.splice(0, items.length); movements.splice(0, movements.length);
-    }
-  }
-  function persistRegressionState() {
-    if (catalogRegressionMode) window.sessionStorage.setItem('warehouse-catalog-regression-state-v1', JSON.stringify({items:items,movements:movements}));
-  }
   items.forEach(function (item) {
     item.totalIncoming = movements.filter(function (movement) { return movement.itemId === item.id && movement.type === 'IN'; }).reduce(function (sum, movement) { return sum + movement.quantity; }, 0);
     item.totalOutgoing = movements.filter(function (movement) { return movement.itemId === item.id && movement.type === 'OUT'; }).reduce(function (sum, movement) { return sum + movement.quantity; }, 0);
@@ -282,16 +268,8 @@
       owners: ['سلطة المياه', 'مصلحة المياه'],
       itemCatalog: { total: items.length, activeTotal: items.length, returned: 50, truncated: true, limit: 50, mode: 'ACTIVE_CAPPED', sort: 'CODE_NAME_ID' },
       recentMovements: movements,
-      settings: { systemName: 'نظام مراقبة المخزون', backupConfigured: false, schemaVersion: '2', catalogImportCompleted: providedCatalogComplete() }
+      settings: { systemName: 'نظام مراقبة المخزون', backupConfigured: false, schemaVersion: '2' }
     };
-  }
-
-  function providedCatalogComplete() {
-    for (var catalogIndex = 1; catalogIndex <= 76; catalogIndex += 1) {
-      var code = 'ITEM' + String(catalogIndex).padStart(3, '0');
-      if (!items.some(function (item) { return item.code === code; })) return false;
-    }
-    return true;
   }
 
   function handle(method, args) {
@@ -345,27 +323,24 @@
       if (payload.type === 'IN') movementItem.totalIncoming = Number(movementItem.totalIncoming || 0) + quantity;
       else movementItem.totalOutgoing = Number(movementItem.totalOutgoing || 0) + quantity;
       movements.unshift(createdMovement);
-      persistRegressionState();
       return { movement: createdMovement, deduplicated: false };
     }
     if (method === 'correctMovement') return { reversal: movements[0], movement: movements[1], originalMovementId: payload.movementId, deduplicated: false };
     if (method === 'reverseMovement') return { movement: movements[0] };
     if (method === 'saveItem') return { item: items[0] };
-    if (method === 'importProvidedCatalog') {
-      var created = 0;
-      var skippedCodes = [];
-      for (var catalogIndex = 1; catalogIndex <= 76; catalogIndex += 1) {
-        var code = 'ITEM' + String(catalogIndex).padStart(3, '0');
-        if (items.some(function (item) { return item.code === code; })) {
-          skippedCodes.push(code);
-          continue;
-        }
-        var owner = catalogIndex % 2 === 0 ? 'سلطة المياه' : 'مصلحة المياه';
-        items.push({ id: 'ITM-CATALOG-' + catalogIndex, code: code, name: 'صنف القائمة الجاهزة ' + code, owner: owner, unit: 'قطعة', openingQuantity: catalogIndex % 12 + 1, currentQuantity: catalogIndex % 12 + 1, reorderLevel: 0, active: true, stockStatus: 'OK' });
-        created += 1;
-      }
-      persistRegressionState();
-      return { catalogTotal: 76, created: created, skipped: skippedCodes.length, skippedCodes: skippedCodes, conflictingCodes: [], owners: ['سلطة المياه', 'مصلحة المياه'], unit: 'قطعة', reorderLevel: 0, completed: providedCatalogComplete() };
+    if (method === 'previewItemFileImport' || method === 'commitItemFileImport') {
+      var importRows = Array.isArray(payload) ? payload : [];
+      var previewRows = importRows.map(function (row, index) {
+        var existing = items.find(function (item) { return item.code === String(row.code || '').trim().toUpperCase(); });
+        var invalid = !String(row.code || '').trim() || !String(row.name || '').trim() || !String(row.owner || '').trim() || Number(row.openingQuantity) < 0 || Number(row.reorderLevel) < 0;
+        var status = invalid ? 'INVALID' : existing ? 'EXISTING' : 'NEW';
+        return { rowNumber:index + 2, status:status, item:row, message:invalid ? 'صف غير صالح.' : existing ? 'موجود مسبقًا بنفس البيانات.' : 'جاهز للإضافة.' };
+      });
+      var result = { total:previewRows.length, valid:previewRows.filter(function(row){return row.status !== 'INVALID';}).length, newItems:previewRows.filter(function(row){return row.status === 'NEW';}).length, existing:previewRows.filter(function(row){return row.status === 'EXISTING';}).length, conflicts:0, invalid:previewRows.filter(function(row){return row.status === 'INVALID';}).length, rows:previewRows };
+      result.canCommit = result.newItems > 0 && result.invalid === 0;
+      if (method === 'previewItemFileImport') return result;
+      previewRows.filter(function(row){return row.status === 'NEW';}).forEach(function(row,index){items.push({id:'ITM-FILE-'+Date.now()+'-'+index,code:String(row.item.code).trim().toUpperCase(),name:row.item.name,owner:row.item.owner,unit:row.item.unit || 'قطعة',openingQuantity:Number(row.item.openingQuantity)||0,currentQuantity:Number(row.item.openingQuantity)||0,reorderLevel:Number(row.item.reorderLevel)||0,active:true,stockStatus:'AVAILABLE'});});
+      return { total:result.total, created:result.newItems, skippedExisting:result.existing, completed:true };
     }
     if (method === 'saveUser') return { user: users[1], temporaryPassword: 'Z!7aPreviewPassword1' };
     if (method === 'resetUserPassword') return { user: users[1], temporaryPassword: 'Z!7aPreviewPassword2' };

@@ -26,8 +26,8 @@ const context = vm.createContext({
   }
 });
 
-const inventorySource = fs.readFileSync('Inventory.gs', 'utf8');
-const backend = [fs.readFileSync('Code.gs', 'utf8'), fs.readFileSync('Repository.gs', 'utf8'), inventorySource].join('\n');
+const inventorySource = fs.readFileSync('warehouse-one-tab/Inventory.gs', 'utf8');
+const backend = [fs.readFileSync('warehouse-one-tab/Code.gs', 'utf8'), fs.readFileSync('warehouse-one-tab/Repository.gs', 'utf8'), inventorySource].join('\n');
 vm.runInContext(backend, context, { filename: 'inventory-backend.gs' });
 
 function expectWarehouseError(code, callable) {

@@ -5,7 +5,7 @@
 !Auth.gs
 !Repository.gs
 !Inventory.gs
-!CatalogImport.gs
+!BulkImport.gs
 !Export.gs
 !Index.html
 !App.html

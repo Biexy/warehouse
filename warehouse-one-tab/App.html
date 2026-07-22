@@ -9,7 +9,8 @@
     movements: [], movementPage: 1, movementPageSize: 25, movementTotal: 0,
     catalog: [], selectedTransactionItem: null, correctionCatalog: [], editingItem: null, editingMovement: null, activeItem: null,
     users: [], stockChart: null, requestIds: Object.create(null),
-    catalogImportCompleted: false, itemEditReturnFocus: null, movementCorrectionReturnFocus: null, reportReturnFocus: null
+    itemEditReturnFocus: null, movementCorrectionReturnFocus: null, reportReturnFocus: null,
+    bulkImportRows: [], bulkImportPreview: null, bulkImportReturnFocus: null
   };
 
   function el(id) { return document.getElementById(id); }
@@ -84,14 +85,12 @@
   async function bootstrap() {
     var data = await rpc('getBootstrap', state.token);
     state.user = data.user; state.permissions = data.permissions || {}; state.dashboard = data.dashboard; state.catalog = data.items || []; state.owners = data.owners || [];
-    state.catalogImportCompleted = Boolean(data.settings && data.settings.catalogImportCompleted);
     el('userSelector').textContent = data.user.displayName + ' — ' + roleName(data.user.role);
     el('activeOperatorBadge').textContent = data.user.displayName;
     el('adminUsersButton').classList.toggle('hidden', !state.permissions.canManageUsers);
     el('backupButton').classList.toggle('hidden', !state.permissions.canCreateBackups);
     el('newItemForm').parentElement.classList.toggle('hidden', !state.permissions.canManageItems);
     el('trxForm').parentElement.classList.toggle('hidden', !state.permissions.canCreateMovements);
-    updateCatalogImportVisibility();
     el('warehouseApp').classList.remove('hidden'); el('loginView').classList.add('hidden');
     populateOwners(); populateCatalog(state.catalog); setDefaultTrxDate(); applyDashboard(data.dashboard); setSyncStatus(true);
     state.passwordChangeRequired = Boolean(data.passwordChangeRequired);
@@ -187,12 +186,6 @@
     var select = el('itemOwnerFilter'), current = select.value;
     select.innerHTML = '<option value="">جميع الجهات</option>' + state.owners.map(function (owner) { return '<option value="' + esc(owner) + '">' + esc(owner) + '</option>'; }).join('');
     select.value = current;
-  }
-
-  function updateCatalogImportVisibility() {
-    var button = el('catalogImportButton');
-    if (!button) return;
-    button.classList.toggle('hidden', !state.permissions.canManageItems || state.catalogImportCompleted);
   }
 
   function itemFilters() { return { query: el('itemSearchInput').value.trim(), owner: el('itemOwnerFilter').value, status: el('itemStatusFilter').value, page: state.itemPage, pageSize: state.itemPageSize }; }
@@ -405,22 +398,97 @@
   }
   function cancelEditItem() { closeItemEditModal(); }
   function deleteItem(id) { var item = state.items.find(function (i) { return i.id === id; }); if (!item) return; showCustomConfirm('إيقاف الصنف', 'سيبقى الصنف وتاريخه محفوظين، ولن يقبل حركات جديدة.', async function () { try { await rpc('saveItem', state.token, { id:item.id, code:item.code, name:item.name, owner:item.owner, unit:item.unit, openingQuantity:item.openingQuantity, reorderLevel:item.reorderLevel, active:false }); showToast('تم إيقاف الصنف مع الحفاظ على تاريخه.', 'success'); await refreshAll(); } catch (error) { showToast(error.message, 'error'); } }); }
-  async function importCatalog() {
-    var button = el('catalogImportButton'); busy(button, true, 'جارٍ الاستيراد…');
+  function normalizeImportHeader(value) {
+    return String(value == null ? '' : value).trim().toLowerCase().replace(/[\s_\-ـ]/g, '').replace(/[أإآ]/g, 'ا');
+  }
+  function mapImportHeaders(headerRow) {
+    var aliases = {
+      code:['الكود','كودالصنف','رمزالصنف','code','itemcode'],
+      name:['الاسم','اسمالصنف','اسمووصفالصنف','name','itemname','description'],
+      owner:['المالك','الجهةالمالكة','owner'],
+      unit:['الوحدة','وحدةالقياس','unit'],
+      openingQuantity:['الرصيد','الرصيدالافتتاحي','opening','openingbalance','openingquantity'],
+      reorderLevel:['حداعادةالطلب','حدالطلب','reorderlevel','reorderpoint']
+    };
+    var normalized = (headerRow || []).map(normalizeImportHeader), result = {};
+    Object.keys(aliases).forEach(function (key) {
+      var wanted = aliases[key].map(normalizeImportHeader);
+      result[key] = normalized.findIndex(function (value) { return wanted.indexOf(value) !== -1; });
+    });
+    var missing = Object.keys(result).filter(function (key) { return result[key] < 0; });
+    if (missing.length) throw new Error('صيغة الملف غير مكتملة. استخدم النموذج المعتمد الذي يحتوي على الأعمدة الستة.');
+    return result;
+  }
+  function resetBulkImport() {
+    state.bulkImportRows = []; state.bulkImportPreview = null;
+    ['bulkImportTotal','bulkImportValid','bulkImportNew','bulkImportExisting','bulkImportConflicts','bulkImportInvalid'].forEach(function (id) { el(id).textContent = '0'; });
+    el('bulkImportCommitButton').disabled = true; el('bulkImportError').classList.add('hidden');
+    el('bulkImportPreviewBody').innerHTML = '<tr><td colspan="9" class="p-8 text-center text-gray-500">اختر ملفاً لعرض نتيجة الفحص.</td></tr>';
+  }
+  function openBulkImportModal() {
+    state.bulkImportReturnFocus = document.activeElement; resetBulkImport(); el('bulkImportFile').value = '';
+    el('bulkImportFileName').textContent = 'XLSX أو XLS أو CSV — بحد أقصى 500 صف.';
+    var modal = el('bulkImportModal'); modal.classList.remove('hidden'); modal.classList.add('flex'); document.body.classList.add('overflow-hidden');
+    setTimeout(function () { el('bulkImportFile').focus(); }, 0);
+  }
+  function closeBulkImportModal() {
+    var modal = el('bulkImportModal'); modal.classList.add('hidden'); modal.classList.remove('flex'); document.body.classList.remove('overflow-hidden');
+    var focus = state.bulkImportReturnFocus; state.bulkImportReturnFocus = null; if (focus && focus.isConnected) focus.focus();
+  }
+  function bulkImportStatusLabel(status) { return ({NEW:'جديد',EXISTING:'موجود',CONFLICT:'تعارض',INVALID:'خطأ'})[status] || status; }
+  function renderBulkImportPreview(preview) {
+    state.bulkImportPreview = preview;
+    el('bulkImportTotal').textContent = preview.total || 0; el('bulkImportValid').textContent = preview.valid || 0;
+    el('bulkImportNew').textContent = preview.newItems || 0; el('bulkImportExisting').textContent = preview.existing || 0;
+    el('bulkImportConflicts').textContent = preview.conflicts || 0; el('bulkImportInvalid').textContent = preview.invalid || 0;
+    el('bulkImportCommitButton').disabled = !preview.canCommit;
+    var colors = {NEW:'text-sky-300',EXISTING:'text-gray-300',CONFLICT:'text-amber-300',INVALID:'text-red-300'};
+    el('bulkImportPreviewBody').innerHTML = (preview.rows || []).map(function (row) {
+      var item = row.item || {};
+      return '<tr class="border-t border-gray-800"><td class="p-3">'+esc(row.rowNumber)+'</td><td class="p-3 font-bold '+(colors[row.status]||'')+'">'+esc(bulkImportStatusLabel(row.status))+'</td><td class="p-3 font-mono text-sky-300">'+esc(item.code)+'</td><td class="p-3">'+esc(item.name)+'</td><td class="p-3">'+esc(item.owner)+'</td><td class="p-3">'+esc(item.unit)+'</td><td class="p-3">'+esc(item.openingQuantity)+'</td><td class="p-3">'+esc(item.reorderLevel)+'</td><td class="p-3 text-gray-400">'+esc(row.message)+'</td></tr>';
+    }).join('');
+  }
+  async function handleBulkImportFile(event) {
+    resetBulkImport();
+    var file = event.target.files && event.target.files[0]; if (!file) return;
+    var extension = (file.name.split('.').pop() || '').toLowerCase();
+    el('bulkImportFileName').textContent = file.name + ' — ' + Math.ceil(file.size / 1024) + ' KB';
     try {
-      var result = await rpc('importProvidedCatalog', state.token);
-      if (result.completed === true || result.catalogImportCompleted === true) { state.catalogImportCompleted = true; updateCatalogImportVisibility(); }
-      state.itemPage = 1; el('itemSearchInput').value = ''; el('itemOwnerFilter').value = ''; el('itemStatusFilter').value = 'ALL'; el('trxItemSearch').value = '';
-      var inventoryReady = await loadItems();
-      var catalogReady = await searchCatalog();
-      if (!catalogReady) showToast('تم الاستيراد، لكن تعذر تحديث قائمة الحركة. أعد البحث أو المحاولة دون فقد البيانات.', 'warning');
-      try { var dashboard = await rpc('getDashboard', state.token, {days:30}); state.dashboard = dashboard; applyDashboard(dashboard); } catch (dashboardError) { showToast('تم الاستيراد، لكن تعذر تحديث المؤشرات. الجدول والنماذج ما زالت متاحة لإعادة المحاولة.', 'warning'); }
-      var created = Number(result.created || 0), skipped = Number(result.skipped || 0), conflicts = result.conflictingCodes || [];
-      if (conflicts.length) showToast('تمت إضافة ' + created + ' صنفًا، مع وجود ' + conflicts.length + ' تعارضًا يحتاج مراجعة: ' + conflicts.slice(0, 6).join('، ') + (conflicts.length > 6 ? '…' : ''), 'warning');
-      else showToast('اكتمل استيراد القائمة المعتمدة: ' + result.catalogTotal + ' صنفًا، أضيف ' + created + '، وموجود مسبقًا ' + skipped + '.', inventoryReady ? 'success' : 'warning');
-      if (!inventoryReady) showToast('تم حفظ الأصناف في الخادم، لكن تحديث الجدول فشل. استخدم «إعادة المحاولة» الظاهر في الجدول؛ نموذج الحركة لم يُعطّل.', 'warning');
-    } catch (error) { showToast(error.message, 'error'); }
+      if (['xlsx','xls','csv'].indexOf(extension) === -1) throw new Error('صيغة الملف غير مدعومة. اختر XLSX أو XLS أو CSV.');
+      if (file.size > 5 * 1024 * 1024) throw new Error('حجم الملف أكبر من 5 MB.');
+      if (!window.XLSX) throw new Error('تعذر تحميل قارئ Excel. تحقق من الاتصال ثم أعد فتح الصفحة.');
+      var workbook = extension === 'csv' ? XLSX.read(await file.text(), {type:'string'}) : XLSX.read(await file.arrayBuffer(), {type:'array'});
+      if (!workbook.SheetNames.length) throw new Error('الملف لا يحتوي على ورقة بيانات.');
+      var matrix = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header:1,defval:'',raw:false});
+      if (matrix.length < 2) throw new Error('لا يحتوي الملف على صفوف أصناف.');
+      var columns = mapImportHeaders(matrix[0]);
+      var rows = matrix.slice(1).filter(function (row) { return row.some(function (cell) { return String(cell).trim() !== ''; }); }).map(function (row) {
+        return {code:row[columns.code],name:row[columns.name],owner:row[columns.owner],unit:row[columns.unit],openingQuantity:row[columns.openingQuantity],reorderLevel:row[columns.reorderLevel]};
+      });
+      if (!rows.length) throw new Error('لا يحتوي الملف على أصناف.');
+      if (rows.length > 500) throw new Error('الحد الأقصى للاستيراد الواحد 500 صف.');
+      state.bulkImportRows = rows;
+      el('bulkImportPreviewBody').innerHTML = '<tr><td colspan="9" class="p-8 text-center text-gray-400">جارٍ فحص '+rows.length+' صفاً…</td></tr>';
+      renderBulkImportPreview(await rpc('previewItemFileImport', state.token, rows));
+    } catch (error) {
+      var box = el('bulkImportError'); box.textContent = error.message || 'تعذر قراءة الملف.'; box.classList.remove('hidden');
+      el('bulkImportPreviewBody').innerHTML = '<tr><td colspan="9" class="p-8 text-center text-red-300">'+esc(box.textContent)+'</td></tr>';
+    }
+  }
+  async function commitBulkItemImport() {
+    if (!state.bulkImportPreview || !state.bulkImportPreview.canCommit) return;
+    var button = el('bulkImportCommitButton'); busy(button, true, 'جارٍ الحفظ في Items…');
+    try {
+      var result = await rpc('commitItemFileImport', state.token, state.bulkImportRows);
+      closeBulkImportModal(); state.itemPage = 1; await refreshAll();
+      showToast('تم حفظ '+result.created+' صنفاً جديداً في ورقة Items، وتجاهل '+result.skippedExisting+' صنفاً موجوداً.', 'success');
+    } catch (error) { var box=el('bulkImportError'); box.textContent=error.message; box.classList.remove('hidden'); }
     finally { busy(button, false); }
+  }
+  function downloadItemImportTemplate() {
+    var csv = '\uFEFFالكود,الاسم,المالك,وحدة القياس,الرصيد الافتتاحي,حد إعادة الطلب\n"ITEM077","اسم الصنف","سلطة المياه","قطعة",0,10';
+    var url = URL.createObjectURL(new Blob([csv], {type:'text/csv;charset=utf-8'})), link = document.createElement('a');
+    link.href = url; link.download = 'نموذج-استيراد-الأصناف.csv'; document.body.appendChild(link); link.click(); link.remove(); setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
   }
 
   async function openItemDetailModal(itemId) {
@@ -554,14 +622,16 @@
   }
 
   document.addEventListener('DOMContentLoaded',function(){
+    el('bulkImportFile').addEventListener('change',handleBulkImportFile);el('bulkImportModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closeBulkImportModal();});
     el('loginForm').addEventListener('submit',handleLogin);el('trxItemSearch').addEventListener('input',function(){renderTransactionItemResults();debouncedCatalog();});el('trxItemSearch').addEventListener('focus',renderTransactionItemResults);el('trxItemClear').addEventListener('click',clearTransactionItemSelection);el('trxChangeItemButton').addEventListener('click',clearTransactionItemSelection);el('trxQtyDecrease').addEventListener('click',function(){adjustTrxQuantity(-1);});el('trxQtyIncrease').addEventListener('click',function(){adjustTrxQuantity(1);});el('trxQty').addEventListener('input',updateBalancePreview);el('newPasswordInput').addEventListener('input',updatePasswordChangeFeedback);el('confirmPasswordInput').addEventListener('input',updatePasswordChangeFeedback);el('correctionItemSearch').addEventListener('input',debouncedCorrectionCatalog);document.querySelectorAll('input[name="trxType"]').forEach(function(r){r.addEventListener('change',updateBalancePreview);});
     document.querySelectorAll('[data-password-toggle]').forEach(function(button){button.addEventListener('click',function(){var input=el(button.dataset.passwordToggle);input.type=input.type==='password'?'text':'password';button.querySelector('i').className=input.type==='password'?'fa-solid fa-eye':'fa-solid fa-eye-slash';});});
     el('passwordHelpModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closePasswordHelp();});el('itemEditModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closeItemEditModal();});el('movementCorrectionModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closeMovementCorrectionModal();});el('reportPreviewModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closeReportPreview();});document.addEventListener('keydown',handleManagedModalKeydown);
 
     window.openPasswordChangeModal = openPasswordChangeModal; window.cancelPasswordChange = cancelPasswordChange; window.retryBootstrap = retryBootstrap; window.loginWithAnotherAccount = loginWithAnotherAccount;
+    window.openBulkImportModal=openBulkImportModal;window.closeBulkImportModal=closeBulkImportModal;window.commitBulkItemImport=commitBulkItemImport;window.downloadItemImportTemplate=downloadItemImportTemplate;
     validateOrLogin();
   });
 
-  Object.assign(window,{handleLogout:handleLogout,confirmUserSwitch:confirmUserSwitch,openPasswordHelp:openPasswordHelp,closePasswordHelp:closePasswordHelp,filterItemsTable:filterItemsTable,changeItemPageSize:changeItemPageSize,filterAuditTrailTable:filterAuditTrailTable,handleTransactionSubmit:handleTransactionSubmit,editTrx:editTrx,cancelEditTrx:cancelEditTrx,handleMovementCorrectionSubmit:handleMovementCorrectionSubmit,closeMovementCorrectionModal:closeMovementCorrectionModal,deleteTrx:deleteTrx,handleNewItemSubmit:handleNewItemSubmit,handleItemEditSubmit:handleItemEditSubmit,editItem:editItem,cancelEditItem:cancelEditItem,closeItemEditModal:closeItemEditModal,deleteItem:deleteItem,importCatalog:importCatalog,openItemDetailModal:openItemDetailModal,closeItemModal:closeItemModal,printSingleItemReport:printSingleItemReport,openReportPreview:openReportPreview,openFilteredMovementPDF:openFilteredMovementPDF,closeReportPreview:closeReportPreview,triggerPrintPDF:triggerPrintPDF,exportInventoryToCSV:exportInventoryToCSV,exportToCSV:exportToCSV,exportMovementTotalsCSV:exportMovementTotalsCSV,openUsersModal:openUsersModal,closeUsersModal:closeUsersModal,handleUserSubmit:handleUserSubmit,editUser:editUser,resetUserAccess:resetUserAccess,openBackupModal:openBackupModal,closeBackupModal:closeBackupModal,configureBackup:configureBackup,createExcelBackup:createExcelBackup,showCustomConfirm:showCustomConfirm,closeConfirmModal:closeConfirmModal,showToast:showToast});
+  Object.assign(window,{handleLogout:handleLogout,confirmUserSwitch:confirmUserSwitch,openPasswordHelp:openPasswordHelp,closePasswordHelp:closePasswordHelp,filterItemsTable:filterItemsTable,changeItemPageSize:changeItemPageSize,filterAuditTrailTable:filterAuditTrailTable,handleTransactionSubmit:handleTransactionSubmit,editTrx:editTrx,cancelEditTrx:cancelEditTrx,handleMovementCorrectionSubmit:handleMovementCorrectionSubmit,closeMovementCorrectionModal:closeMovementCorrectionModal,deleteTrx:deleteTrx,handleNewItemSubmit:handleNewItemSubmit,handleItemEditSubmit:handleItemEditSubmit,editItem:editItem,cancelEditItem:cancelEditItem,closeItemEditModal:closeItemEditModal,deleteItem:deleteItem,openItemDetailModal:openItemDetailModal,closeItemModal:closeItemModal,printSingleItemReport:printSingleItemReport,openReportPreview:openReportPreview,openFilteredMovementPDF:openFilteredMovementPDF,closeReportPreview:closeReportPreview,triggerPrintPDF:triggerPrintPDF,exportInventoryToCSV:exportInventoryToCSV,exportToCSV:exportToCSV,exportMovementTotalsCSV:exportMovementTotalsCSV,openUsersModal:openUsersModal,closeUsersModal:closeUsersModal,handleUserSubmit:handleUserSubmit,editUser:editUser,resetUserAccess:resetUserAccess,openBackupModal:openBackupModal,closeBackupModal:closeBackupModal,configureBackup:configureBackup,createExcelBackup:createExcelBackup,showCustomConfirm:showCustomConfirm,closeConfirmModal:closeConfirmModal,showToast:showToast});
 })();
 </script>
