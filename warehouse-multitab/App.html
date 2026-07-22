@@ -7,7 +7,7 @@
     token: '', user: null, permissions: {}, dashboard: null, passwordChangeRequired: false,
     items: [], itemPage: 1, itemPageSize: 20, itemTotal: 0, owners: [],
     movements: [], movementPage: 1, movementPageSize: 25, movementTotal: 0,
-    catalog: [], correctionCatalog: [], editingItem: null, editingMovement: null, activeItem: null,
+    catalog: [], selectedTransactionItem: null, correctionCatalog: [], editingItem: null, editingMovement: null, activeItem: null,
     users: [], stockChart: null, requestIds: Object.create(null),
     catalogImportCompleted: false, itemEditReturnFocus: null, movementCorrectionReturnFocus: null, reportReturnFocus: null,
     activeTab: 'dashboard'
@@ -158,9 +158,16 @@
     } catch (error) { showError(errorNode, error); } finally { busy(button, false); }
   }
 
+  function updatePasswordChangeFeedback() {
+    var next = el('newPasswordInput').value; var confirmation = el('confirmPasswordInput').value; var validLength = next.length >= 6; var matches = confirmation.length > 0 && next === confirmation;
+    var track = el('passwordStrengthTrack'); track.style.width = !next ? '0%' : validLength ? '100%' : Math.max(16, Math.round(next.length / 6 * 100)) + '%'; track.className = 'block h-full rounded-full transition-all duration-200 ' + (validLength ? 'bg-brand-emerald' : 'bg-brand-crimson');
+    el('passwordStrengthLabel').textContent = !next ? 'لم تُكتب بعد' : validLength ? 'صالحة للاستخدام' : 'باقي ' + (6 - next.length) + ' أحرف'; el('passwordStrengthLabel').className = 'min-w-24 text-left text-[10px] ' + (validLength ? 'text-brand-emerald' : next ? 'text-brand-crimson' : 'text-gray-400');
+    el('passwordMatchHint').textContent = !confirmation ? 'أعد كتابة كلمة المرور للتأكيد.' : matches ? 'كلمتا المرور متطابقتان.' : 'كلمتا المرور غير متطابقتين.'; el('passwordMatchHint').className = 'mt-1.5 block min-h-5 text-[10px] ' + (!confirmation ? 'text-gray-400' : matches ? 'text-brand-emerald' : 'text-brand-crimson'); el('passwordChangeSubmit').disabled = !validLength || !matches;
+  }
+
   function showPasswordChangeModal_(required) {
     state.passwordChangeRequired = Boolean(required);
-    el('passwordChangeForm').reset(); el('passwordChangeError').classList.add('hidden');
+    el('passwordChangeForm').reset(); el('passwordChangeError').classList.add('hidden'); updatePasswordChangeFeedback();
     el('loginTargetUserLabel').textContent = required ? 'غيّر كلمة المرور المؤقتة قبل متابعة العمل.' : 'استخدم كلمة المرور الحالية لتعيين كلمة مرور جديدة.';
     el('passwordChangeCancelButton').textContent = required ? 'خروج' : 'إلغاء';
     el('loginAuthModal').classList.remove('hidden'); el('authPasswordInput').focus();
@@ -208,7 +215,7 @@
       var statusClass = item.stockStatus === 'OK' ? 'text-brand-emerald bg-brand-emerald/10' : item.stockStatus === 'INACTIVE' ? 'text-gray-400 bg-gray-700/30' : 'text-brand-crimson bg-brand-crimson/10';
       var itemLabel = esc(item.name || item.code);
       var actions = '<button type="button" onclick="event.stopPropagation();openItemDetailModal(\'' + esc(item.id) + '\')" class="table-action-button text-brand-neon hover:bg-brand-neon/10" aria-label="عرض بطاقة ' + itemLabel + '"><i class="fa-solid fa-eye" aria-hidden="true"></i><span>عرض</span></button>';
-      if (state.permissions.canManageItems) actions += '<button type="button" onclick="event.stopPropagation();editItem(\'' + esc(item.id) + '\')" class="table-action-button text-brand-amber hover:bg-brand-amber/10" aria-label="تعديل ' + itemLabel + '"><i class="fa-solid fa-pen" aria-hidden="true"></i><span>تعديل</span></button><button type="button" onclick="event.stopPropagation();deleteItem(\'' + esc(item.id) + '\')" class="table-action-button text-brand-crimson hover:bg-brand-crimson/10" aria-label="إيقاف ' + itemLabel + '"><i class="fa-solid fa-ban" aria-hidden="true"></i><span>إيقاف</span></button>';
+      if (state.permissions.canManageItems) actions += '<details class="table-action-menu" onclick="event.stopPropagation()"><summary class="table-action-button text-gray-300 hover:bg-white/5" aria-label="إجراءات إضافية للصنف"><i class="fa-solid fa-ellipsis" aria-hidden="true"></i><span>المزيد</span></summary><div class="table-action-menu__panel"><button type="button" onclick="editItem(\'' + esc(item.id) + '\')" class="table-action-button text-brand-amber hover:bg-brand-amber/10" aria-label="تعديل ' + itemLabel + '"><i class="fa-solid fa-pen" aria-hidden="true"></i><span>تعديل</span></button><button type="button" onclick="deleteItem(\'' + esc(item.id) + '\')" class="table-action-button text-brand-crimson hover:bg-brand-crimson/10" aria-label="إيقاف ' + itemLabel + '"><i class="fa-solid fa-ban" aria-hidden="true"></i><span>إيقاف</span></button></div></details>';
       return '<tr class="border-b border-gray-800/40 hover:bg-brand-darkBlue/20 cursor-pointer" onclick="openItemDetailModal(\'' + esc(item.id) + '\')"><td data-label="الكود" class="inventory-code font-bold text-brand-neon">' + esc(item.code) + '</td><td class="inventory-primary text-white font-medium">' + esc(item.name) + '<span class="inventory-meta">' + esc(item.owner || 'غير محدد') + ' · ' + esc(item.unit || '') + '</span></td><td data-label="الافتتاحي" class="inventory-number text-center text-gray-400">' + fmt(item.openingQuantity) + '</td><td data-label="الوارد" class="inventory-number text-center text-brand-emerald">+' + fmt(item.totalIncoming) + '</td><td data-label="الصادر" class="inventory-number text-center text-brand-crimson">-' + fmt(item.totalOutgoing) + '</td><td data-label="الرصيد الحالي" class="inventory-number text-center font-extrabold text-white">' + fmt(item.currentQuantity) + '</td><td data-label="الحالة" class="text-center"><span class="px-2.5 py-1 rounded-full text-[10px] font-bold ' + statusClass + '">' + status + '</span></td><td data-label="الإجراءات" class="card-span-full"><div class="table-actions">' + actions + '</div></td></tr>';
     }).join('');
   }
@@ -241,19 +248,22 @@
     var body = el('auditLogsTableBody'); if (!movements.length) { body.innerHTML = '<tr><td colspan="9" class="empty-row table-state-cell">لا توجد حركات مطابقة للفلاتر الحالية.</td></tr>'; return; }
     body.innerHTML = movements.map(function (m) {
       var actions = '<button type="button" onclick="openItemDetailModal(\'' + esc(m.itemId) + '\')" class="table-action-button text-brand-neon hover:bg-brand-neon/10" aria-label="عرض بطاقة الصنف"><i class="fa-solid fa-eye" aria-hidden="true"></i><span>عرض</span></button>';
-      if (state.permissions.canReverseMovements && m.type !== 'REVERSAL' && !m.reversed) actions += '<button type="button" onclick="editTrx(\'' + esc(m.id) + '\')" class="table-action-button text-brand-amber hover:bg-brand-amber/10" aria-label="تصحيح الحركة"><i class="fa-solid fa-pen" aria-hidden="true"></i><span>تصحيح</span></button><button type="button" onclick="deleteTrx(\'' + esc(m.id) + '\')" class="table-action-button text-brand-crimson hover:bg-brand-crimson/10" aria-label="عكس الحركة"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i><span>عكس</span></button>';
+      if (state.permissions.canReverseMovements && m.type !== 'REVERSAL' && !m.reversed) actions += '<details class="table-action-menu"><summary class="table-action-button text-gray-300 hover:bg-white/5" aria-label="إجراءات الحركة"><i class="fa-solid fa-ellipsis" aria-hidden="true"></i><span>المزيد</span></summary><div class="table-action-menu__panel"><button type="button" onclick="editTrx(\'' + esc(m.id) + '\')" class="table-action-button text-brand-amber hover:bg-brand-amber/10" aria-label="تصحيح الحركة"><i class="fa-solid fa-pen" aria-hidden="true"></i><span>تصحيح</span></button><button type="button" onclick="deleteTrx(\'' + esc(m.id) + '\')" class="table-action-button text-brand-crimson hover:bg-brand-crimson/10" aria-label="عكس الحركة"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i><span>عكس</span></button></div></details>';
       var badge = m.type === 'IN' ? 'text-brand-emerald' : m.type === 'OUT' ? 'text-brand-crimson' : 'text-brand-amber';
       return '<tr><td data-label="التاريخ" class="inventory-number whitespace-nowrap">' + esc(m.documentDate || String(m.timestamp).slice(0,10)) + '<div class="text-[10px] text-gray-500">' + esc(String(m.timestamp || '').replace('T',' ').slice(0,16)) + '</div></td><td data-label="المستخدم">' + esc(m.actorDisplayName || m.actor && m.actor.displayName || m.actorUsername) + '</td><td data-label="العملية" class="font-bold ' + badge + '">' + movementName(m.type) + (m.reversed ? ' (معكوسة)' : '') + '</td><td class="inventory-primary cursor-pointer text-brand-neon" onclick="openItemDetailModal(\'' + esc(m.itemId) + '\')">' + esc(m.itemName) + '<div class="text-[10px]">' + esc(m.itemCode) + '</div></td><td data-label="الكمية" class="inventory-number text-center">' + fmt(m.quantity) + '</td><td data-label="المرجع" class="text-center">' + esc(m.reference) + '</td><td data-label="الجهة">' + esc(m.party) + '</td><td data-label="الملاحظات" class="card-span-full">' + esc(m.notes || '—') + '</td><td data-label="الإجراءات" class="card-span-full"><div class="table-actions">' + actions + '</div></td></tr>';
     }).join('');
   }
 
   function populateCatalog(items) {
-    var select = el('trxItem'), selected = select.value, previousSelected = state.catalog.find(function (item) { return item.id === selected; });
-    state.catalog = (items || []).slice();
-    if (previousSelected && !state.catalog.some(function (item) { return item.id === previousSelected.id; })) state.catalog.unshift(previousSelected);
-    select.innerHTML = '<option value="">اختر الصنف</option>' + state.catalog.filter(function (i) { return i.active !== false; }).map(function (item) { return '<option value="' + esc(item.id) + '">' + esc(item.name) + ' (' + esc(item.code) + ')</option>'; }).join('');
-    select.value = selected; updateBalancePreview();
+    state.catalog = items || [];
+    if (state.selectedTransactionItem && !state.catalog.some(function (item) { return item.id === state.selectedTransactionItem.id; })) state.catalog.unshift(state.selectedTransactionItem);
+    var select = el('trxItem'); select.innerHTML = '<option value=""></option>' + state.catalog.filter(function (item) { return item.active !== false; }).map(function (item) { return '<option value="' + esc(item.id) + '">' + esc(item.name) + '</option>'; }).join('');
+    select.value = state.selectedTransactionItem ? state.selectedTransactionItem.id : ''; renderTransactionItemResults(); updateSelectedTransactionItemCard(); updateBalancePreview();
   }
+  function renderTransactionItemResults() { var list = el('trxItemResults'); if (!list) return; var query = el('trxItemSearch').value.trim().toLowerCase(); var rows = state.catalog.filter(function (item) { return item.active !== false && (!query || String(item.name + ' ' + item.code + ' ' + (item.owner || '')).toLowerCase().indexOf(query) !== -1); }).slice(0, 10); list.innerHTML = rows.map(function (item) { return '<button type="button" role="option" class="trx-item-option" data-item-id="' + esc(item.id) + '"><span><strong>' + esc(item.name) + '</strong><small>' + esc(item.code) + ' · ' + esc(item.owner || '') + '</small></span><span class="trx-item-option__balance">' + fmt(item.currentQuantity) + ' ' + esc(item.unit || '') + '</span></button>'; }).join('') || '<p class="trx-item-results__empty">لا توجد أصناف مطابقة.</p>'; list.querySelectorAll('[data-item-id]').forEach(function (button) { button.addEventListener('click', function () { selectTransactionItem(button.dataset.itemId); }); }); list.classList.toggle('hidden', !el('trxItemSearch').value.trim()); }
+  function selectTransactionItem(itemId) { state.selectedTransactionItem = state.catalog.find(function (item) { return item.id === itemId; }) || null; el('trxItem').value = state.selectedTransactionItem ? state.selectedTransactionItem.id : ''; el('trxItemSearch').value = state.selectedTransactionItem ? state.selectedTransactionItem.name : ''; el('trxItemResults').classList.add('hidden'); updateSelectedTransactionItemCard(); updateBalancePreview(); }
+  function clearTransactionItemSelection() { state.selectedTransactionItem = null; el('trxItem').value = ''; el('trxItemSearch').value = ''; el('trxItemResults').classList.add('hidden'); updateSelectedTransactionItemCard(); updateBalancePreview(); el('trxItemSearch').focus(); }
+  function updateSelectedTransactionItemCard() { var item = state.selectedTransactionItem; var card = el('trxSelectedItemCard'); if (!card) return; card.classList.toggle('hidden', !item); if (!item) return; el('trxSelectedItemCode').textContent = item.code; el('trxSelectedItemName').textContent = item.name; el('trxSelectedItemMeta').textContent = (item.owner || 'غير محدد') + ' · ' + (item.unit || ''); }
 
   async function searchCatalog() {
     var query = el('trxItemSearch').value.trim();
@@ -262,22 +272,26 @@
   }
   var debouncedCatalog = debounce(searchCatalog, 250);
 
+  function adjustTrxQuantity(delta) { var input = el('trxQty'); input.value = Math.max(0, (Number(input.value) || 0) + delta); updateBalancePreview(); input.focus(); }
+  function updateTransactionTypeUI() { var type = document.querySelector('input[name="trxType"]:checked'); var incoming = !type || type.value === 'وارد'; el('trxDocLabel').textContent = incoming ? 'رقم المرجع أو إذن الاستلام' : 'رقم المرجع أو إذن الصرف'; el('trxEntityLabel').textContent = incoming ? 'الجهة الموردة' : 'الجهة المستلمة'; el('trxSubmitLabel').textContent = incoming ? 'اعتماد الإدخال وتحديث الرصيد' : 'اعتماد الصرف وتحديث الرصيد'; }
+
   function updateBalancePreview() {
-    var item = state.catalog.find(function (candidate) { return candidate.id === el('trxItem').value; }); var qty = Number(el('trxQty').value) || 0; var type = document.querySelector('input[name="trxType"]:checked');
-    if (!item) { el('trxCurrentBalance').textContent = '—'; el('trxProjectedBalance').textContent = '—'; return; }
+    var item = state.selectedTransactionItem; var qty = Number(el('trxQty').value) || 0; var type = document.querySelector('input[name="trxType"]:checked'); updateTransactionTypeUI();
+    if (!item) { el('trxCurrentBalance').textContent = '—'; el('trxProjectedBalance').textContent = '—'; el('trxQtyUnit').textContent = ''; el('trxSubmitBtn').disabled = true; return; }
     var projected = item.currentQuantity + (type && type.value === 'صادر' ? -qty : qty);
     el('trxCurrentBalance').textContent = fmt(item.currentQuantity) + ' ' + item.unit; el('trxProjectedBalance').textContent = fmt(projected) + ' ' + item.unit;
-    el('trxProjectedBalance').className = projected < 0 ? 'text-brand-crimson' : 'text-brand-emerald'; el('trxSubmitBtn').disabled = projected < 0;
+    el('trxQtyUnit').textContent = item.unit || ''; el('trxProjectedBalance').className = projected < 0 ? 'text-brand-crimson' : 'text-brand-emerald'; el('trxSubmitBtn').disabled = projected < 0 || qty <= 0;
   }
   function setDefaultTrxDate() { el('trxDate').value = today() + 'T' + new Date().toTimeString().slice(0,5); }
 
   async function handleTransactionSubmit(event) {
     event.preventDefault(); var button = el('trxSubmitBtn'); var selectedType = document.querySelector('input[name="trxType"]:checked').value;
+    if (!state.selectedTransactionItem) { showToast('اختر الصنف قبل اعتماد الحركة.', 'warning'); el('trxItemSearch').focus(); return; }
     var payload = { clientRequestId: state.requestIds.movement || (state.requestIds.movement = newRequestId('MOV')), itemId: el('trxItem').value, type: selectedType === 'وارد' ? 'IN' : 'OUT', quantity: Number(el('trxQty').value), reference: el('trxDoc').value.trim(), documentDate: el('trxDate').value.slice(0,10), party: el('trxEntity').value.trim(), notes: el('trxNotes').value.trim() };
     busy(button, true, 'جارٍ الترحيل…');
     try {
       await rpc('saveMovement', state.token, payload); showToast('تم ترحيل الحركة وتأمين الرصيد.', 'success');
-      state.requestIds.movement = ''; el('trxForm').reset(); document.querySelector('input[name="trxType"][value="وارد"]').checked = true; setDefaultTrxDate(); await refreshAll();
+      state.requestIds.movement = ''; el('trxForm').reset(); state.selectedTransactionItem = null; document.querySelector('input[name="trxType"][value="وارد"]').checked = true; setDefaultTrxDate(); updateSelectedTransactionItemCard(); await refreshAll();
     } catch (error) { showToast(error.message, 'error'); } finally { busy(button, false); updateBalancePreview(); }
   }
 
@@ -445,12 +459,15 @@
   async function loadUsers() { el('usersListContainer').innerHTML='<p class="text-xs text-gray-400">جارٍ التحميل…</p>'; try { var r=await rpc('listUsers',state.token,{page:1,pageSize:100}); state.users=r.users||[]; renderUsersList(); }catch(e){el('usersListContainer').innerHTML='<p class="text-xs text-brand-crimson">'+esc(e.message)+'</p>';} }
   function renderUsersList() {
     el('usersListContainer').innerHTML = state.users.map(function (u) {
-      var actions = '<button type="button" onclick="editUser(\'' + esc(u.id) + '\')" class="inline-flex items-center gap-1.5 rounded-lg border border-brand-amber/25 px-2.5 py-1.5 text-[10px] font-bold text-brand-amber hover:bg-brand-amber/10"><i class="fa-solid fa-pen" aria-hidden="true"></i>تعديل</button>';
-      if (!state.user || u.id !== state.user.id) actions += '<button type="button" onclick="resetUserAccess(\'' + esc(u.id) + '\')" class="inline-flex items-center gap-1.5 rounded-lg border border-brand-neon/25 px-2.5 py-1.5 text-[10px] font-bold text-brand-neon hover:bg-brand-neon/10"><i class="fa-solid fa-key" aria-hidden="true"></i>إعادة تعيين كلمة المرور</button>';
-      return '<div class="grid gap-3 bg-brand-navy/60 p-3 rounded-xl sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"><div><strong class="text-xs text-white">' + esc(u.displayName) + '</strong><div class="text-[10px] text-gray-400">' + esc(u.username) + ' — ' + roleName(u.role) + ' — ' + (u.active ? 'نشط' : 'موقوف') + '</div></div><div class="flex flex-wrap gap-2">' + actions + '</div></div>';
+      var actions = '<button type="button" onclick="editUser(\'' + esc(u.id) + '\')" class="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-brand-amber/25 px-3 text-[10px] font-bold text-brand-amber hover:bg-brand-amber/10"><i class="fa-solid fa-pen" aria-hidden="true"></i>تعديل</button>';
+      if (!state.user || u.id !== state.user.id) actions += '<button type="button" onclick="resetUserAccess(\'' + esc(u.id) + '\')" class="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-brand-neon/25 px-3 text-[10px] font-bold text-brand-neon hover:bg-brand-neon/10"><i class="fa-solid fa-key" aria-hidden="true"></i>إعادة تعيين الوصول</button>';
+      var statusClass = u.active ? 'text-brand-emerald bg-brand-emerald/10 border-brand-emerald/20' : 'text-gray-400 bg-gray-800 border-gray-700';
+      return '<article class="grid gap-3 rounded-xl border border-gray-800 bg-brand-navy/55 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"><div class="min-w-0"><div class="flex flex-wrap items-center gap-2"><strong class="truncate text-xs text-white">' + esc(u.displayName) + '</strong><span class="rounded-full border px-2 py-0.5 text-[9px] font-bold ' + statusClass + '">' + (u.active ? 'نشط' : 'موقوف') + '</span></div><div class="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-gray-400"><span dir="ltr">@' + esc(u.username) + '</span><span><i class="fa-solid fa-shield-halved ml-1 text-gray-500"></i>' + roleName(u.role) + '</span></div></div><div class="flex flex-wrap gap-2">' + actions + '</div></article>';
     }).join('') || '<p class="text-xs text-gray-400">لا توجد حسابات.</p>';
   }
-  async function handleUserSubmit(event) { event.preventDefault(); var id=el('editUserId').value, button=el('userFormSubmitBtn'); busy(button,true,'جارٍ الحفظ…'); try { var r=await rpc('saveUser',state.token,{id:id||undefined,username:el('userNameInput').value.trim(),displayName:el('userDisplayNameInput').value.trim(),role:el('userRoleInput').value,active:el('userActiveInput').value==='true'}); if(r.temporaryPassword){el('temporaryPasswordBox').textContent='كلمة المرور المؤقتة (تُعرض مرة واحدة): '+r.temporaryPassword;el('temporaryPasswordBox').classList.remove('hidden');} else showToast('تم تحديث الحساب.','success'); resetUserFormState(false); await loadUsers();}catch(e){showToast(e.message,'error');}finally{busy(button,false);} }
+  function showTemporaryPassword(password) { var box=el('temporaryPasswordBox'); box.innerHTML='<div class="flex items-start justify-between gap-3"><div><strong class="block text-[11px]">كلمة المرور المؤقتة</strong><code class="mt-1 block select-all text-sm text-white" dir="ltr">'+esc(password)+'</code><small class="mt-1 block text-[9px]">تُعرض مرة واحدة فقط؛ سلّمها للمستخدم بأمان.</small></div><button type="button" onclick="copyTemporaryPassword()" class="min-h-10 shrink-0 rounded-lg border border-brand-amber/30 px-3 text-[10px] font-bold hover:bg-brand-amber/10"><i class="fa-regular fa-copy ml-1"></i>نسخ</button></div>'; box.dataset.password=password; box.classList.remove('hidden'); }
+  async function copyTemporaryPassword() { var value=el('temporaryPasswordBox').dataset.password||''; if(!value)return; try{await navigator.clipboard.writeText(value);showToast('تم نسخ كلمة المرور المؤقتة.','success');}catch(e){showToast('حدد كلمة المرور وانسخها يدويًا.','warning');} }
+  async function handleUserSubmit(event) { event.preventDefault(); var id=el('editUserId').value, button=el('userFormSubmitBtn'); busy(button,true,'جارٍ الحفظ…'); try { var r=await rpc('saveUser',state.token,{id:id||undefined,username:el('userNameInput').value.trim(),displayName:el('userDisplayNameInput').value.trim(),role:el('userRoleInput').value,active:el('userActiveInput').value==='true'}); if(r.temporaryPassword)showTemporaryPassword(r.temporaryPassword); else showToast('تم تحديث الحساب.','success'); resetUserFormState(false); await loadUsers();}catch(e){showToast(e.message,'error');}finally{busy(button,false);} }
   function editUser(id){var u=state.users.find(function(x){return x.id===id;});if(!u)return;el('editUserId').value=u.id;el('userNameInput').value=u.username;el('userNameInput').disabled=true;el('userDisplayNameInput').value=u.displayName;el('userRoleInput').value=u.role;el('userActiveInput').value=String(u.active);}
   function resetUserAccess(id){
     var user = state.users.find(function (row) { return row.id === id; });
@@ -518,14 +535,16 @@
     if (tab === 'dashboard' && state.stockChart) requestAnimationFrame(function () { state.stockChart.resize(); });
   }
   function handleWorkspaceTabKeydown(event) {
-    if (['ArrowRight','ArrowLeft','Home','End'].indexOf(event.key) === -1) return;
+    if (['ArrowRight','ArrowLeft','ArrowUp','ArrowDown','Home','End'].indexOf(event.key) === -1) return;
     var buttons = Array.prototype.slice.call(document.querySelectorAll('[data-workspace-tab]')).filter(function (button) { return !button.classList.contains('hidden'); });
     var index = buttons.indexOf(event.currentTarget); if (index < 0) return; event.preventDefault();
     if (event.key === 'Home') index = 0;
     else if (event.key === 'End') index = buttons.length - 1;
-    else index = (index + (event.key === 'ArrowLeft' ? 1 : -1) + buttons.length) % buttons.length;
+    else index = (index + (event.key === 'ArrowLeft' || event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
     buttons[index].focus(); switchWorkspaceTab(buttons[index].dataset.workspaceTab);
   }
+
+  function updateWorkspaceNavigationOrientation() { el('workspaceTabList').setAttribute('aria-orientation', window.innerWidth > 1024 ? 'vertical' : 'horizontal'); }
 
   function releaseManagedModalScroll() {
     var itemOpen = !el('itemEditModal').classList.contains('hidden');
@@ -553,15 +572,15 @@
   }
 
   document.addEventListener('DOMContentLoaded',function(){
-    el('loginForm').addEventListener('submit',handleLogin);el('trxItemSearch').addEventListener('input',debouncedCatalog);el('trxItem').addEventListener('change',updateBalancePreview);el('trxQty').addEventListener('input',updateBalancePreview);el('correctionItemSearch').addEventListener('input',debouncedCorrectionCatalog);document.querySelectorAll('input[name="trxType"]').forEach(function(r){r.addEventListener('change',updateBalancePreview);});
+    el('loginForm').addEventListener('submit',handleLogin);el('trxItemSearch').addEventListener('input',function(){renderTransactionItemResults();debouncedCatalog();});el('trxItemSearch').addEventListener('focus',renderTransactionItemResults);el('trxItemClear').addEventListener('click',clearTransactionItemSelection);el('trxChangeItemButton').addEventListener('click',clearTransactionItemSelection);el('trxQtyDecrease').addEventListener('click',function(){adjustTrxQuantity(-1);});el('trxQtyIncrease').addEventListener('click',function(){adjustTrxQuantity(1);});el('trxQty').addEventListener('input',updateBalancePreview);el('newPasswordInput').addEventListener('input',updatePasswordChangeFeedback);el('confirmPasswordInput').addEventListener('input',updatePasswordChangeFeedback);el('correctionItemSearch').addEventListener('input',debouncedCorrectionCatalog);document.querySelectorAll('input[name="trxType"]').forEach(function(r){r.addEventListener('change',updateBalancePreview);});
     document.querySelectorAll('[data-password-toggle]').forEach(function(button){button.addEventListener('click',function(){var input=el(button.dataset.passwordToggle);input.type=input.type==='password'?'text':'password';button.querySelector('i').className=input.type==='password'?'fa-solid fa-eye':'fa-solid fa-eye-slash';});});
     el('passwordHelpModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closePasswordHelp();});el('itemEditModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closeItemEditModal();});el('movementCorrectionModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closeMovementCorrectionModal();});el('reportPreviewModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closeReportPreview();});document.addEventListener('keydown',handleManagedModalKeydown);
-    document.querySelectorAll('[data-workspace-tab]').forEach(function(button){button.addEventListener('click',function(){switchWorkspaceTab(button.dataset.workspaceTab);});button.addEventListener('keydown',handleWorkspaceTabKeydown);});
+    document.querySelectorAll('[data-workspace-tab]').forEach(function(button){button.addEventListener('click',function(){switchWorkspaceTab(button.dataset.workspaceTab);});button.addEventListener('keydown',handleWorkspaceTabKeydown);});updateWorkspaceNavigationOrientation();window.addEventListener('resize',debounce(updateWorkspaceNavigationOrientation,120));
     window.addEventListener('popstate',function(){if(state.user)switchWorkspaceTab(workspaceTabFromLocation(),{replace:true,scroll:false});});
     window.openPasswordChangeModal = openPasswordChangeModal; window.cancelPasswordChange = cancelPasswordChange; window.retryBootstrap = retryBootstrap; window.loginWithAnotherAccount = loginWithAnotherAccount;
     validateOrLogin();
   });
 
-  Object.assign(window,{switchWorkspaceTab:switchWorkspaceTab,handleLogout:handleLogout,confirmUserSwitch:confirmUserSwitch,openPasswordHelp:openPasswordHelp,closePasswordHelp:closePasswordHelp,filterItemsTable:filterItemsTable,changeItemPageSize:changeItemPageSize,filterAuditTrailTable:filterAuditTrailTable,handleTransactionSubmit:handleTransactionSubmit,editTrx:editTrx,cancelEditTrx:cancelEditTrx,handleMovementCorrectionSubmit:handleMovementCorrectionSubmit,closeMovementCorrectionModal:closeMovementCorrectionModal,deleteTrx:deleteTrx,handleNewItemSubmit:handleNewItemSubmit,handleItemEditSubmit:handleItemEditSubmit,editItem:editItem,cancelEditItem:cancelEditItem,closeItemEditModal:closeItemEditModal,deleteItem:deleteItem,importCatalog:importCatalog,openItemDetailModal:openItemDetailModal,closeItemModal:closeItemModal,printSingleItemReport:printSingleItemReport,openReportPreview:openReportPreview,openFilteredMovementPDF:openFilteredMovementPDF,closeReportPreview:closeReportPreview,triggerPrintPDF:triggerPrintPDF,exportInventoryToCSV:exportInventoryToCSV,exportToCSV:exportToCSV,exportMovementTotalsCSV:exportMovementTotalsCSV,openUsersModal:openUsersModal,closeUsersModal:closeUsersModal,handleUserSubmit:handleUserSubmit,editUser:editUser,resetUserAccess:resetUserAccess,openBackupModal:openBackupModal,closeBackupModal:closeBackupModal,configureBackup:configureBackup,createExcelBackup:createExcelBackup,showCustomConfirm:showCustomConfirm,closeConfirmModal:closeConfirmModal,showToast:showToast});
+  Object.assign(window,{switchWorkspaceTab:switchWorkspaceTab,handleLogout:handleLogout,confirmUserSwitch:confirmUserSwitch,openPasswordHelp:openPasswordHelp,closePasswordHelp:closePasswordHelp,filterItemsTable:filterItemsTable,changeItemPageSize:changeItemPageSize,filterAuditTrailTable:filterAuditTrailTable,handleTransactionSubmit:handleTransactionSubmit,editTrx:editTrx,cancelEditTrx:cancelEditTrx,handleMovementCorrectionSubmit:handleMovementCorrectionSubmit,closeMovementCorrectionModal:closeMovementCorrectionModal,deleteTrx:deleteTrx,handleNewItemSubmit:handleNewItemSubmit,handleItemEditSubmit:handleItemEditSubmit,editItem:editItem,cancelEditItem:cancelEditItem,closeItemEditModal:closeItemEditModal,deleteItem:deleteItem,importCatalog:importCatalog,openItemDetailModal:openItemDetailModal,closeItemModal:closeItemModal,printSingleItemReport:printSingleItemReport,openReportPreview:openReportPreview,openFilteredMovementPDF:openFilteredMovementPDF,closeReportPreview:closeReportPreview,triggerPrintPDF:triggerPrintPDF,exportInventoryToCSV:exportInventoryToCSV,exportToCSV:exportToCSV,exportMovementTotalsCSV:exportMovementTotalsCSV,openUsersModal:openUsersModal,closeUsersModal:closeUsersModal,handleUserSubmit:handleUserSubmit,editUser:editUser,resetUserAccess:resetUserAccess,copyTemporaryPassword:copyTemporaryPassword,openBackupModal:openBackupModal,closeBackupModal:closeBackupModal,configureBackup:configureBackup,createExcelBackup:createExcelBackup,showCustomConfirm:showCustomConfirm,closeConfirmModal:closeConfirmModal,showToast:showToast});
 })();
 </script>

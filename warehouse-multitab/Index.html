@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <base target="_top">
@@ -207,13 +207,37 @@
         .loading-row, .empty-row, .error-row { padding: 2rem !important; text-align: center !important; color: #9ca3af; }
         .error-row { color:#fca5a5; }
         .pagination-bar { display:flex; align-items:center; justify-content:center; gap:.75rem; padding-top:1rem; }
-        .workspace-tabs-shell { position: sticky; top: 4.85rem; z-index: 35; padding: .75rem 1rem 0; background: linear-gradient(180deg, rgba(9,13,22,.98) 72%, rgba(9,13,22,0)); }
-        .workspace-tabs { width: min(100%, 80rem); display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: .45rem; margin: 0 auto; padding: .45rem; border: 1px solid var(--ui-border); border-radius: 1rem; background: rgba(17,24,39,.94); box-shadow: 0 12px 30px rgba(0,0,0,.2); backdrop-filter: blur(14px); }
-        .workspace-tabs.workspace-tabs--admin { grid-template-columns: repeat(5,minmax(0,1fr)); }
-        .workspace-tab { min-height: 46px; display: inline-flex; align-items: center; justify-content: center; gap: .55rem; padding: .65rem .8rem; border: 1px solid transparent; border-radius: .75rem; color: #9aa7bb; font-size: .78rem; font-weight: 800; white-space: nowrap; transition: color .18s ease, background-color .18s ease, border-color .18s ease; }
+        .trx-item-option { width:100%; display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:.75rem; border:0; border-radius:.65rem; color:#fff; text-align:right; transition:background-color .16s ease; }
+        .trx-item-option:hover, .trx-item-option:focus-visible { background:rgba(56,189,248,.1); outline:none; }
+        .trx-item-option span:first-child { min-width:0; display:grid; gap:.25rem; }
+        .trx-item-option strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.72rem; }
+        .trx-item-option small { color:#94a3b8; font-size:.62rem; }
+        .trx-item-option__balance { flex:none; color:#38bdf8; font-size:.68rem; font-weight:800; }
+        .trx-item-results__empty { padding:1rem; color:#94a3b8; text-align:center; font-size:.7rem; }
+        .table-actions { position:relative; }
+        .table-action-menu { position:relative; }
+        .table-action-menu > summary { list-style:none; cursor:pointer; }
+        .table-action-menu > summary::-webkit-details-marker { display:none; }
+        .table-action-menu__panel { position:absolute; left:0; top:calc(100% + .35rem); z-index:25; min-width:10rem; display:grid; gap:.25rem; padding:.4rem; border:1px solid #374151; border-radius:.75rem; background:#111827; box-shadow:0 16px 36px rgba(0,0,0,.38); }
+        .table-action-menu__panel .table-action-button { width:100%; justify-content:flex-start; }
+        .workspace-tabs-shell { position: fixed; inset: 5.15rem 0 0 auto; z-index: 35; width: 15rem; padding: 1rem .85rem; border-left: 1px solid var(--ui-border); background: rgba(9,13,22,.96); backdrop-filter: blur(18px); }
+        .workspace-nav-heading { display:flex; align-items:center; gap:.75rem; margin:.2rem .25rem 1rem; padding:.75rem; border-bottom:1px solid rgba(148,163,184,.12); }
+        .workspace-nav-heading__icon { width:2.5rem; height:2.5rem; display:grid; place-items:center; border-radius:.8rem; color:#38bdf8; background:rgba(56,189,248,.1); border:1px solid rgba(56,189,248,.2); }
+        .workspace-nav-heading strong { display:block; color:#fff; font-size:.78rem; }
+        .workspace-nav-heading small { display:block; margin-top:.15rem; color:#7f8da3; font-size:.6rem; }
+        .workspace-tabs { width:100%; display:flex; flex-direction:column; gap:.35rem; padding:.35rem; border:0; border-radius:1rem; background:transparent; box-shadow:none; }
+        .workspace-tabs.workspace-tabs--admin { grid-template-columns:none; }
+        .workspace-tab { min-height:48px; display:inline-flex; align-items:center; justify-content:flex-start; gap:.75rem; padding:.7rem .85rem; border:1px solid transparent; border-radius:.8rem; color:#9aa7bb; font-size:.76rem; font-weight:800; white-space:nowrap; transition:color .18s ease, background-color .18s ease, border-color .18s ease, transform .18s ease; }
+        .workspace-tab i { width:1.2rem; text-align:center; }
         .workspace-tab:hover { color: #f8fafc; background: rgba(148,163,184,.07); }
-        .workspace-tab[aria-selected="true"] { color: #e0f2fe; border-color: rgba(56,189,248,.32); background: rgba(56,189,248,.12); box-shadow: inset 0 -2px 0 #38bdf8; }
+        .workspace-tab[aria-selected="true"] { color:#e0f2fe; border-color:rgba(56,189,248,.28); background:linear-gradient(90deg,rgba(56,189,248,.14),rgba(56,189,248,.05)); box-shadow:inset -3px 0 0 #38bdf8; transform:translateX(-2px); }
         .workspace-tab:focus-visible { outline: 3px solid rgba(56,189,248,.52); outline-offset: 2px; }
+        .multitab-workspace { width:calc(100% - 15rem) !important; max-width:80rem !important; margin-right:15rem !important; margin-left:auto !important; }
+        .workspace-view-section { width:calc(100% - 15rem); max-width:80rem; margin-right:15rem; margin-left:auto; }
+        .app-footer { width:calc(100% - 15rem); margin-right:15rem; background:rgba(11,19,43,.72); }
+        .app-footer__inner { max-width:80rem; margin-inline:auto; display:flex; align-items:center; justify-content:space-between; gap:1rem; }
+        .app-footer__status { display:inline-flex; align-items:center; gap:.45rem; color:#94a3b8; }
+        .app-footer__status::before { content:''; width:.45rem; height:.45rem; border-radius:999px; background:#10b981; box-shadow:0 0 0 4px rgba(16,185,129,.09); }
         [data-workspace-panel][hidden], #warehouseWorkspace[hidden] { display: none !important; }
         .multitab-workspace { grid-template-columns: repeat(12,minmax(0,1fr)) !important; align-items: start; }
         .multitab-layout-group { display: contents; }
@@ -244,7 +268,13 @@
             .table-action-button { width: 100%; padding-inline: .45rem; }
             #itemsWorkspacePanel, #newItemWorkspacePanel { grid-column: 1 / -1; }
             #newItemWorkspacePanel { position: static; }
-            .workspace-tabs-shell { position: static; }
+            .workspace-tabs-shell { position:sticky; inset:auto; top:4.85rem; width:auto; padding:.75rem 1rem 0; border-left:0; background:linear-gradient(180deg,rgba(9,13,22,.98) 72%,rgba(9,13,22,0)); }
+            .workspace-nav-heading { display:none; }
+            .workspace-tabs { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.35rem; padding:.4rem; border:1px solid var(--ui-border); background:rgba(17,24,39,.94); }
+            .workspace-tabs.workspace-tabs--admin { grid-template-columns:repeat(5,minmax(0,1fr)); }
+            .workspace-tab { justify-content:center; transform:none !important; }
+            .workspace-tab[aria-selected="true"] { box-shadow:inset 0 -2px 0 #38bdf8; }
+            .multitab-workspace, .workspace-view-section, .app-footer { width:100% !important; margin-right:auto !important; }
         }
         @media (max-width: 640px) {
             .login-screen { align-items: flex-start; padding: .75rem; }
@@ -288,6 +318,7 @@
             .workspace-tab span { display: none; }
             .workspace-tab::after { content: attr(data-mobile-label); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
             .workspace-tab[aria-selected="true"] { box-shadow: inset 0 2px 0 #38bdf8; }
+            .app-footer__inner { display:grid; justify-items:center; text-align:center; }
             .workspace-view-section { padding: 1rem .75rem 1.5rem; }
             .workspace-view-heading, .report-hub-grid, .admin-hub-grid, .report-filter-grid { grid-template-columns: minmax(0,1fr); display: grid; }
             .report-filter-grid .report-filter-wide { grid-column: auto; }
@@ -390,6 +421,7 @@
     <div id="toastContainer" class="fixed top-24 left-6 z-50 flex flex-col gap-2"></div>
 
     <nav class="workspace-tabs-shell" aria-label="أقسام نظام المخزون">
+        <div class="workspace-nav-heading" aria-hidden="true"><span class="workspace-nav-heading__icon"><i class="fa-solid fa-warehouse"></i></span><span><strong>مساحة العمل</strong><small>التنقل بين وظائف النظام</small></span></div>
         <div id="workspaceTabList" class="workspace-tabs" role="tablist" aria-orientation="horizontal">
             <button id="dashboardTabButton" type="button" class="workspace-tab" role="tab" aria-label="لوحة المتابعة" aria-selected="true" aria-controls="dashboardMetricsPanel dashboardAnalyticsPanel" tabindex="0" data-workspace-tab="dashboard" data-mobile-label="الرئيسية"><i class="fa-solid fa-chart-line" aria-hidden="true"></i><span>لوحة المتابعة</span></button>
             <button id="itemsTabButton" type="button" class="workspace-tab" role="tab" aria-label="الأصناف والأرصدة" aria-selected="false" aria-controls="itemsWorkspacePanel newItemWorkspacePanel" tabindex="-1" data-workspace-tab="items" data-mobile-label="الأصناف"><i class="fa-solid fa-boxes-stacked" aria-hidden="true"></i><span>الأصناف والأرصدة</span></button>
@@ -541,26 +573,40 @@
                         </div>
                     </div>
 
-                    <div>
-                        <label for="trxItem" class="block text-xs font-bold text-gray-300 mb-2">الصنف</label>
-                        <input id="trxItemSearch" type="search" placeholder="ابحث باسم الصنف أو الكود" class="w-full mb-2 bg-brand-navy border border-gray-700 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-brand-neon">
-                        <p class="professional-note mb-2"><i class="fa-solid fa-circle-info" aria-hidden="true"></i><span>اكتب الاسم أو الكود للوصول إلى أي صنف في الدليل.</span></p>
-                        <select id="trxItem" required class="w-full bg-brand-navy border border-gray-700 rounded-xl px-4 py-3 text-xs text-white focus:outline-none focus:border-brand-neon focus:ring-1 focus:ring-brand-neon">
-                            <option value="">اختر الصنف</option>
-                        </select>
+                    <div id="trxItemPicker" class="relative">
+                        <label for="trxItemSearch" class="block text-xs font-bold text-gray-300 mb-2">الصنف</label>
+                        <div class="relative">
+                            <i class="fa-solid fa-magnifying-glass absolute right-4 top-1/2 -translate-y-1/2 text-gray-500" aria-hidden="true"></i>
+                            <input id="trxItemSearch" type="search" role="combobox" aria-autocomplete="list" aria-controls="trxItemResults" aria-expanded="false" autocomplete="off" placeholder="اكتب كود الصنف أو اسمه" class="w-full min-h-12 bg-brand-navy border border-gray-700 rounded-xl pr-11 pl-12 py-3 text-sm text-white focus:outline-none focus:border-brand-neon focus:ring-1 focus:ring-brand-neon">
+                            <button id="trxItemClear" type="button" class="hidden absolute left-2 top-1/2 -translate-y-1/2 min-w-10 min-h-10 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors" aria-label="إلغاء اختيار الصنف"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+                        </div>
+                        <p id="trxItemHelp" class="professional-note mt-2"><i class="fa-solid fa-circle-info" aria-hidden="true"></i><span>ابحث بالكود أو الاسم، ثم اختر نتيجة واحدة.</span></p>
+                        <div id="trxItemResults" class="hidden absolute z-30 top-full inset-x-0 mt-2 max-h-64 overflow-y-auto rounded-xl border border-gray-700 bg-brand-darkBlue p-1.5 shadow-2xl" role="listbox" aria-label="نتائج البحث عن الأصناف"></div>
+                        <select id="trxItem" class="hidden" tabindex="-1" aria-hidden="true"><option value="">اختر الصنف</option></select>
+
+                        <div id="trxSelectedItemCard" class="hidden mt-3 rounded-xl border border-brand-neon/25 bg-brand-neon/5 p-3" aria-live="polite">
+                            <div class="flex items-start justify-between gap-3">
+                                <div class="min-w-0"><span id="trxSelectedItemCode" class="inventory-code text-[11px] font-bold text-brand-neon"></span><strong id="trxSelectedItemName" class="block mt-1 text-xs leading-6 text-white"></strong><span id="trxSelectedItemMeta" class="block mt-1 text-[11px] text-gray-400"></span></div>
+                                <button id="trxChangeItemButton" type="button" class="min-h-11 shrink-0 rounded-lg border border-gray-700 px-3 text-[11px] font-bold text-gray-300 hover:border-brand-neon hover:text-brand-neon transition-colors">تغيير</button>
+                            </div>
+                            <div class="mt-3 grid grid-cols-2 gap-2 border-t border-gray-700/70 pt-3"><div><span class="block text-[10px] text-gray-400">الرصيد الحالي</span><strong id="trxCurrentBalance" class="mt-1 block text-sm text-white">—</strong></div><div><span class="block text-[10px] text-gray-400">بعد الترحيل</span><strong id="trxProjectedBalance" class="mt-1 block text-sm">—</strong></div></div>
+                        </div>
                     </div>
 
-                    <div id="trxBalancePreview" class="balance-preview" aria-live="polite"><div><span>الرصيد الحالي</span><strong id="trxCurrentBalance">—</strong></div><div><span>الرصيد المتوقع بعد الترحيل</span><strong id="trxProjectedBalance">—</strong></div></div>
+                    <div>
+                        <label for="trxQty" class="block text-xs font-bold text-gray-300 mb-2">الكمية</label>
+                        <div class="flex min-h-12 items-stretch overflow-hidden rounded-xl border border-gray-700 bg-brand-navy focus-within:border-brand-neon focus-within:ring-1 focus-within:ring-brand-neon">
+                            <button id="trxQtyDecrease" type="button" class="min-w-12 border-l border-gray-700 text-gray-300 hover:bg-white/5 hover:text-white transition-colors" aria-label="إنقاص الكمية"><i class="fa-solid fa-minus" aria-hidden="true"></i></button>
+                            <input type="number" id="trxQty" min="0.000001" step="any" inputmode="decimal" required placeholder="0" class="min-w-0 flex-1 bg-transparent px-3 py-3 text-center text-base font-bold text-white focus:outline-none">
+                            <button id="trxQtyIncrease" type="button" class="min-w-12 border-r border-gray-700 text-gray-300 hover:bg-white/5 hover:text-white transition-colors" aria-label="زيادة الكمية"><i class="fa-solid fa-plus" aria-hidden="true"></i></button>
+                            <span id="trxQtyUnit" class="min-w-14 self-center px-3 text-center text-[11px] text-gray-400">وحدة</span>
+                        </div>
+                    </div>
 
-                    <div class="grid grid-cols-2 gap-4">
-                        <div>
-                            <label for="trxQty" class="block text-xs font-bold text-gray-300 mb-2">الكمية</label>
-                            <input type="number" id="trxQty" min="1" required placeholder="مثال: 50" class="w-full bg-brand-navy border border-gray-700 rounded-xl px-4 py-3 text-xs text-white focus:outline-none focus:border-brand-neon focus:ring-1 focus:ring-brand-neon">
-                        </div>
-                        <div>
-                            <label for="trxDoc" class="block text-xs font-bold text-gray-300 mb-2">رقم المرجع أو الإذن</label>
-                            <input type="text" id="trxDoc" required placeholder="مثال: REC-9905" class="w-full bg-brand-navy border border-gray-700 rounded-xl px-4 py-3 text-xs text-white focus:outline-none focus:border-brand-neon focus:ring-1 focus:ring-brand-neon">
-                        </div>
+                    <div>
+                        <label id="trxDocLabel" for="trxDoc" class="block text-xs font-bold text-gray-300 mb-2">رقم الفاتورة أو سند الاستلام</label>
+                        <input type="text" id="trxDoc" required placeholder="مثال: REC-9905" aria-describedby="trxDocHelp" class="w-full bg-brand-navy border border-gray-700 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-neon focus:ring-1 focus:ring-brand-neon">
+                        <p id="trxDocHelp" class="mt-1.5 text-[11px] text-gray-500">أدخل الرقم المكتوب على مستند الاستلام.</p>
                     </div>
 
                     <div class="grid grid-cols-2 gap-4">
@@ -569,7 +615,7 @@
                             <input type="datetime-local" id="trxDate" required class="w-full bg-brand-navy border border-gray-700 rounded-xl px-4 py-3 text-xs text-white focus:outline-none focus:border-brand-neon focus:ring-1 focus:ring-brand-neon">
                         </div>
                         <div>
-                            <label for="trxEntity" class="block text-xs font-bold text-gray-300 mb-2">الجهة المستلمة أو الموردة</label>
+                            <label id="trxEntityLabel" for="trxEntity" class="block text-xs font-bold text-gray-300 mb-2">الجهة الموردة</label>
                             <input type="text" id="trxEntity" required placeholder="مثال: قسم الصيانة / شركة التوريد" class="w-full bg-brand-navy border border-gray-700 rounded-xl px-4 py-3 text-xs text-white focus:outline-none focus:border-brand-neon focus:ring-1 focus:ring-brand-neon">
                         </div>
                     </div>
@@ -585,7 +631,7 @@
                     </div>
 
                     <button type="submit" id="trxSubmitBtn" class="primary-action w-full bg-brand-neon hover:brightness-105 text-brand-navy font-bold text-xs py-3.5 rounded-xl transition-all flex items-center justify-center gap-2">
-                        <i class="fa-solid fa-circle-check"></i> اعتماد الحركة وتحديث الرصيد
+                        <i class="fa-solid fa-circle-check"></i><span id="trxSubmitLabel">تسجيل إدخال المخزون</span>
                     </button>
 
                 </form>
@@ -925,39 +971,23 @@
     </div>
 
     <!-- Modal النافذة المحدثة لإدارة الموظفين (اسم المستخدم + كلمة المرور) -->
-    <div id="usersModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
-        <div class="bg-brand-darkBlue border border-gray-800 max-w-lg w-full rounded-3xl shadow-2xl p-6 relative">
-            <button onclick="closeUsersModal()" class="absolute top-6 left-6 text-gray-400 hover:text-white transition-all text-xl">
-                <i class="fa-solid fa-circle-xmark"></i>
-            </button>
-            <div class="mb-5">
-                <h3 class="section-heading text-lg font-bold text-white"><i class="fa-solid fa-user-lock text-brand-neon ml-2"></i>إدارة المستخدمين والصلاحيات</h3>
-                <p class="section-description text-xs mt-1">إضافة الحسابات، تحديد الأدوار، وإعادة تعيين الوصول.</p>
+    <div id="usersModal" class="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center hidden p-2 sm:p-5" role="dialog" aria-modal="true" aria-labelledby="usersModalTitle">
+        <div class="w-full max-w-5xl max-h-[94dvh] overflow-hidden rounded-3xl border border-gray-800 bg-brand-darkBlue shadow-2xl flex flex-col">
+            <div class="relative flex-none border-b border-gray-800 px-5 py-5 sm:px-7">
+                <button type="button" onclick="closeUsersModal()" class="absolute top-4 left-4 grid h-11 w-11 place-items-center rounded-full bg-gray-800 text-gray-300 transition hover:bg-gray-700 hover:text-white" aria-label="إغلاق إدارة المستخدمين"><i class="fa-solid fa-xmark"></i></button>
+                <div class="flex items-start gap-3 pl-12"><span class="grid h-12 w-12 shrink-0 place-items-center rounded-2xl border border-brand-neon/20 bg-brand-neon/10 text-brand-neon"><i class="fa-solid fa-user-shield"></i></span><div><h3 id="usersModalTitle" class="section-heading text-lg font-bold text-white">إدارة المستخدمين والصلاحيات</h3><p class="section-description text-xs mt-1 leading-6">إنشاء الحسابات وتحديد مسؤوليات الوصول وإدارة كلمات المرور المؤقتة.</p></div></div>
             </div>
-
-            <form id="userForm" onsubmit="handleUserSubmit(event)" class="space-y-4 mb-6">
-                <input type="hidden" id="editUserId" value="">
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                        <label for="userNameInput" class="block text-xs font-bold text-gray-300 mb-1.5">اسم المستخدم:</label>
-                        <input type="text" id="userNameInput" required placeholder="مثال: storekeeper" class="w-full bg-brand-navy border border-gray-700 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-brand-neon">
-                    </div>
-                    <div>
-                        <label for="userDisplayNameInput" class="block text-xs font-bold text-gray-300 mb-1.5">الاسم المعروض:</label>
-                        <input type="text" id="userDisplayNameInput" required placeholder="مثال: أمين المخزن" class="w-full bg-brand-navy border border-gray-700 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-brand-neon">
-                    </div>
-                </div>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3"><div><label for="userRoleInput" class="block text-xs font-bold text-gray-300 mb-1.5">الدور:</label><select id="userRoleInput" class="w-full bg-brand-navy border border-gray-700 rounded-xl px-3.5 py-2 text-xs text-white"><option value="STOREKEEPER">أمين مخزن</option><option value="AUDITOR">مدقق</option><option value="ADMIN">مدير</option></select></div><div><label for="userActiveInput" class="block text-xs font-bold text-gray-300 mb-1.5">الحالة:</label><select id="userActiveInput" class="w-full bg-brand-navy border border-gray-700 rounded-xl px-3.5 py-2 text-xs text-white"><option value="true">نشط</option><option value="false">موقوف</option></select></div></div>
-                <div id="temporaryPasswordBox" class="hidden bg-brand-amber/10 border border-brand-amber/25 text-brand-amber text-xs rounded-xl p-3" role="status"></div>
-                <button type="submit" id="userFormSubmitBtn" class="w-full bg-brand-neon text-brand-navy font-bold text-xs py-2.5 rounded-xl hover:opacity-90 transition-all shadow-md flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-user-plus"></i> حفظ الحساب
-                </button>
-            </form>
-
-            <div class="border-t border-gray-800 pt-4">
-                <h4 class="text-xs font-bold text-white mb-3">المستخدمون المسجلون</h4>
-                <div id="usersListContainer" class="space-y-2 max-h-[220px] overflow-y-auto pr-1">
-                </div>
+            <div class="min-h-0 flex-1 overflow-y-auto grid lg:grid-cols-[minmax(19rem,.8fr)_minmax(0,1.2fr)]">
+                <form id="userForm" onsubmit="handleUserSubmit(event)" class="space-y-4 border-b border-gray-800 p-5 sm:p-7 lg:border-b-0 lg:border-l">
+                    <div><span class="text-[10px] font-bold text-brand-neon">بيانات الحساب</span><h4 class="mt-1 text-sm font-bold text-white">إضافة مستخدم أو تعديل بياناته</h4></div>
+                    <input type="hidden" id="editUserId" value="">
+                    <label class="block"><span class="block text-xs font-bold text-gray-300 mb-1.5">اسم المستخدم</span><input type="text" id="userNameInput" required autocomplete="off" placeholder="مثال: storekeeper" class="w-full min-h-12 bg-brand-navy border border-gray-700 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-brand-neon"></label>
+                    <label class="block"><span class="block text-xs font-bold text-gray-300 mb-1.5">الاسم المعروض</span><input type="text" id="userDisplayNameInput" required placeholder="مثال: أمين المخزن" class="w-full min-h-12 bg-brand-navy border border-gray-700 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-brand-neon"></label>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3"><label><span class="block text-xs font-bold text-gray-300 mb-1.5">الدور الوظيفي</span><select id="userRoleInput" class="w-full min-h-12 bg-brand-navy border border-gray-700 rounded-xl px-3.5 py-2 text-xs text-white"><option value="STOREKEEPER">أمين مخزن</option><option value="AUDITOR">مدقق</option><option value="ADMIN">مدير النظام</option></select></label><label><span class="block text-xs font-bold text-gray-300 mb-1.5">حالة الحساب</span><select id="userActiveInput" class="w-full min-h-12 bg-brand-navy border border-gray-700 rounded-xl px-3.5 py-2 text-xs text-white"><option value="true">نشط</option><option value="false">موقوف</option></select></label></div>
+                    <div id="temporaryPasswordBox" class="hidden rounded-xl border border-brand-amber/25 bg-brand-amber/10 p-3 text-xs leading-6 text-brand-amber" role="status"></div>
+                    <button type="submit" id="userFormSubmitBtn" class="w-full min-h-12 bg-brand-neon text-brand-navy font-extrabold text-xs rounded-xl hover:opacity-90 transition flex items-center justify-center gap-2"><i class="fa-solid fa-user-plus"></i><span>حفظ الحساب</span></button>
+                </form>
+                <section class="min-w-0 p-5 sm:p-7" aria-labelledby="registeredUsersTitle"><div class="mb-4 flex items-center justify-between gap-3"><div><h4 id="registeredUsersTitle" class="text-sm font-bold text-white">المستخدمون المسجلون</h4><p class="mt-1 text-[10px] text-gray-400">راجع الدور والحالة أو أعد تعيين الوصول للحساب.</p></div><span class="rounded-full border border-gray-700 bg-brand-navy px-3 py-1 text-[10px] text-gray-300"><i class="fa-solid fa-users ml-1 text-brand-neon"></i>حسابات النظام</span></div><div id="usersListContainer" class="space-y-2 max-h-[55dvh] overflow-y-auto pl-1"></div></section>
             </div>
         </div>
     </div>
@@ -974,25 +1004,61 @@
         </div>
     </div>
 
-    <!-- Modal تغيير كلمة المرور الإلزامي -->
-    <div id="loginAuthModal" class="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center hidden p-4">
-        <div class="bg-brand-darkBlue border border-brand-neon/30 max-w-sm w-full rounded-3xl shadow-2xl p-6 relative text-center">
-            <div class="w-14 h-16 bg-brand-neon/10 border border-brand-neon/20 rounded-2xl flex items-center justify-center mx-auto mb-4 text-brand-neon text-2xl">
-                <i class="fa-solid fa-shield-halved"></i>
-            </div>
-            <h3 class="section-heading text-lg font-bold text-white mb-1">تعيين كلمة مرور جديدة</h3>
-            <p id="loginTargetUserLabel" class="section-description text-xs mb-5">غيّر كلمة المرور المؤقتة قبل متابعة العمل.</p>
+    <!-- بوابة تعيين كلمة المرور -->
+    <div id="loginAuthModal" class="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center hidden p-4 sm:p-6" style="z-index: 80" role="dialog" aria-modal="true" aria-labelledby="passwordChangeTitle">
+        <div class="relative w-full max-w-lg overflow-hidden rounded-3xl border border-brand-neon/25 bg-brand-darkBlue shadow-2xl">
+            <div class="h-1 bg-gradient-to-l from-brand-neon to-brand-emerald"></div>
+            <div class="p-5 sm:p-7">
+                <div class="flex items-start gap-4">
+                    <div class="grid h-14 w-14 shrink-0 place-items-center rounded-2xl border border-brand-neon/25 bg-brand-neon/10 text-xl text-brand-neon" aria-hidden="true"><i class="fa-solid fa-shield-halved"></i></div>
+                    <div class="min-w-0 text-right">
+                        <span id="passwordChangeEyebrow" class="text-[11px] font-bold text-brand-neon">خطوة حماية أخيرة</span>
+                        <h3 id="passwordChangeTitle" class="section-heading mt-1 text-xl font-bold text-white">تأمين الحساب بكلمة مرور جديدة</h3>
+                        <p id="loginTargetUserLabel" class="section-description mt-2 text-xs leading-6">غيّر كلمة المرور المؤقتة قبل متابعة العمل.</p>
+                    </div>
+                </div>
 
-            <form id="passwordChangeForm" onsubmit="confirmUserSwitch(event)" class="space-y-4">
-                <label class="block text-right"><span class="block text-xs font-bold text-gray-300 mb-1.5">كلمة المرور الحالية</span><input type="password" id="authPasswordInput" minlength="6" required autocomplete="current-password" class="w-full bg-brand-navy border border-gray-700 rounded-xl px-4 py-3 text-xs text-white focus:outline-none focus:border-brand-neon"></label>
-                <label class="block text-right"><span class="block text-xs font-bold text-gray-300 mb-1.5">كلمة المرور الجديدة</span><input type="password" id="newPasswordInput" minlength="6" required autocomplete="new-password" placeholder="6 أحرف على الأقل" class="w-full bg-brand-navy border border-gray-700 rounded-xl px-4 py-3 text-xs text-white focus:outline-none focus:border-brand-neon"></label>
-                <label class="block text-right"><span class="block text-xs font-bold text-gray-300 mb-1.5">تأكيد كلمة المرور</span><input type="password" id="confirmPasswordInput" minlength="6" required autocomplete="new-password" class="w-full bg-brand-navy border border-gray-700 rounded-xl px-4 py-3 text-xs text-white focus:outline-none focus:border-brand-neon"></label>
-                <p id="passwordChangeError" class="text-xs text-brand-crimson hidden" role="alert"></p>
-                <div class="flex gap-2"><button id="passwordChangeSubmit" type="submit" class="flex-grow bg-brand-neon text-brand-navy font-bold text-xs py-3 rounded-xl hover:opacity-90 transition-all shadow-md">حفظ كلمة المرور</button><button id="passwordChangeCancelButton" type="button" onclick="cancelPasswordChange()" class="bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold text-xs px-4 py-3 rounded-xl transition-all">خروج</button></div>
-            </form>
+                <div class="my-5 flex items-start gap-2 rounded-xl border border-brand-neon/15 bg-brand-navy/60 p-3 text-right text-[11px] leading-6 text-gray-300">
+                    <i class="fa-solid fa-circle-info mt-1 text-brand-neon" aria-hidden="true"></i>
+                    <span>اختر أي كلمة مرور تريدها. الشرط الوحيد أن تكون 6 أحرف على الأقل.</span>
+                </div>
+
+                <form id="passwordChangeForm" onsubmit="confirmUserSwitch(event)" class="space-y-4">
+                    <label class="block text-right">
+                        <span class="mb-1.5 block text-xs font-bold text-gray-200">كلمة المرور الحالية</span>
+                        <span class="relative block">
+                            <i class="fa-solid fa-key absolute right-4 top-1/2 -translate-y-1/2 text-gray-500" aria-hidden="true"></i>
+                            <input type="password" id="authPasswordInput" minlength="6" required autocomplete="current-password" class="w-full min-h-12 rounded-xl border border-gray-700 bg-brand-navy pr-11 pl-12 py-3 text-sm text-white outline-none transition-colors focus:border-brand-neon focus:ring-2 focus:ring-brand-neon/15">
+                            <button type="button" data-password-toggle="authPasswordInput" class="absolute left-1 top-1/2 grid min-h-11 min-w-11 -translate-y-1/2 place-items-center rounded-lg text-gray-400 hover:bg-white/5 hover:text-white" aria-label="إظهار أو إخفاء كلمة المرور الحالية"><i class="fa-solid fa-eye" aria-hidden="true"></i></button>
+                        </span>
+                    </label>
+                    <label class="block text-right">
+                        <span class="mb-1.5 block text-xs font-bold text-gray-200">كلمة المرور الجديدة</span>
+                        <span class="relative block">
+                            <i class="fa-solid fa-lock absolute right-4 top-1/2 -translate-y-1/2 text-gray-500" aria-hidden="true"></i>
+                            <input type="password" id="newPasswordInput" minlength="6" maxlength="256" required autocomplete="new-password" placeholder="6 أحرف على الأقل" aria-describedby="passwordStrengthLabel" class="w-full min-h-12 rounded-xl border border-gray-700 bg-brand-navy pr-11 pl-12 py-3 text-sm text-white outline-none transition-colors focus:border-brand-neon focus:ring-2 focus:ring-brand-neon/15">
+                            <button type="button" data-password-toggle="newPasswordInput" class="absolute left-1 top-1/2 grid min-h-11 min-w-11 -translate-y-1/2 place-items-center rounded-lg text-gray-400 hover:bg-white/5 hover:text-white" aria-label="إظهار أو إخفاء كلمة المرور الجديدة"><i class="fa-solid fa-eye" aria-hidden="true"></i></button>
+                        </span>
+                        <span class="mt-2 flex items-center gap-2"><span class="h-1.5 flex-1 overflow-hidden rounded-full bg-brand-navy"><span id="passwordStrengthTrack" class="block h-full w-0 rounded-full bg-brand-crimson transition-all duration-200"></span></span><span id="passwordStrengthLabel" class="min-w-24 text-left text-[10px] text-gray-400">لم تُكتب بعد</span></span>
+                    </label>
+                    <label class="block text-right">
+                        <span class="mb-1.5 block text-xs font-bold text-gray-200">تأكيد كلمة المرور الجديدة</span>
+                        <span class="relative block">
+                            <i class="fa-solid fa-check-double absolute right-4 top-1/2 -translate-y-1/2 text-gray-500" aria-hidden="true"></i>
+                            <input type="password" id="confirmPasswordInput" minlength="6" maxlength="256" required autocomplete="new-password" aria-describedby="passwordMatchHint" class="w-full min-h-12 rounded-xl border border-gray-700 bg-brand-navy pr-11 pl-12 py-3 text-sm text-white outline-none transition-colors focus:border-brand-neon focus:ring-2 focus:ring-brand-neon/15">
+                            <button type="button" data-password-toggle="confirmPasswordInput" class="absolute left-1 top-1/2 grid min-h-11 min-w-11 -translate-y-1/2 place-items-center rounded-lg text-gray-400 hover:bg-white/5 hover:text-white" aria-label="إظهار أو إخفاء تأكيد كلمة المرور"><i class="fa-solid fa-eye" aria-hidden="true"></i></button>
+                        </span>
+                        <span id="passwordMatchHint" class="mt-1.5 block min-h-5 text-[10px] text-gray-400" aria-live="polite">أعد كتابة كلمة المرور للتأكيد.</span>
+                    </label>
+                    <p id="passwordChangeError" class="hidden rounded-xl border border-brand-crimson/30 bg-brand-crimson/10 p-3 text-right text-xs text-brand-crimson" role="alert"></p>
+                    <div class="grid grid-cols-[1fr_auto] gap-2 pt-1">
+                        <button id="passwordChangeSubmit" type="submit" class="min-h-12 rounded-xl bg-brand-neon px-5 text-xs font-extrabold text-brand-navy shadow-md transition-all hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"><i class="fa-solid fa-shield-check ml-2" aria-hidden="true"></i>حفظ كلمة المرور والمتابعة</button>
+                        <button id="passwordChangeCancelButton" type="button" onclick="cancelPasswordChange()" class="min-h-12 rounded-xl bg-gray-800 px-4 text-xs font-bold text-gray-300 transition-colors hover:bg-gray-700 hover:text-white">خروج</button>
+                    </div>
+                </form>
+            </div>
         </div>
     </div>
-
     <div id="backupModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
         <div class="bg-brand-darkBlue border border-gray-800 max-w-lg w-full rounded-3xl shadow-2xl p-6 relative">
             <button onclick="closeBackupModal()" class="absolute top-6 left-6 text-gray-400 hover:text-white text-xl"><i class="fa-solid fa-circle-xmark"></i></button>
@@ -1047,9 +1113,8 @@
 
     <div id="printArea" class="hidden"></div>
 
-    <footer class="bg-brand-navy border-t border-gray-800 py-6 px-6 text-center text-xs text-gray-400 mt-auto">
-        <p>© 2026 نظام إدارة المخزون — جميع العمليات موثقة ضمن سجل التدقيق.</p>
-        <p class="text-[10px] text-gray-500 mt-1">تتم مزامنة البيانات وحفظها في Google Sheets وفق صلاحيات المستخدم.</p>
+    <footer class="app-footer border-t border-gray-800 py-5 px-6 text-xs text-gray-400 mt-auto">
+        <div class="app-footer__inner"><div><p class="font-bold text-gray-300">نظام إدارة المخزون والرقابة الداخلية</p><p class="mt-1 text-[10px] text-gray-500">© 2026 — جميع الحركات محفوظة ضمن سجل تدقيق موثّق.</p></div><p class="app-footer__status text-[10px]">البيانات متزامنة مع Google Sheets</p></div>
     </footer>
     </div>
 

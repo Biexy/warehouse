@@ -55,5 +55,8 @@ assert.match(index, /responsive-card-table/);
 assert.match(index, /@media \(max-width: 640px\)/);
 assert.match(index, /login-help-button[^>]*onclick="[^"]*passwordHelpModal/, 'login reset-password link must have a direct modal fallback');
 assert.match(app, /function openPasswordHelp\(\)\{var modal=el\('passwordHelpModal'\);if\(modal\.parentNode!==document\.body\)document\.body\.appendChild\(modal\)/, 'password-help modal must be moved outside the hidden warehouse app before opening');
+for (const id of ['trxItemResults', 'trxSelectedItemCard', 'trxQtyDecrease', 'trxQtyIncrease', 'trxSubmitLabel']) assert.match(index, new RegExp(`id=["']${id}["']`), `improved movement control ${id} is missing`);
+for (const hook of ['selectTransactionItem(', 'clearTransactionItemSelection(', 'updateTransactionTypeUI(', 'adjustTrxQuantity(']) assert.ok(app.includes(hook), `movement UX hook ${hook} is missing`);
+assert.match(app, /table-action-menu/, 'compact inventory and movement action menus are missing');
 
 console.log('quick patch UI invariants: ok');

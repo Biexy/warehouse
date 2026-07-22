@@ -6,7 +6,7 @@
   if (new URLSearchParams(window.location.search).get('skipLogin') === '1') {
     try {
       window.sessionStorage.setItem(
-        'warehouse-control.session-token.v1',
+        'warehouse.session.same-tab.v2',
         'wms_preview_token_1234567890123456789012345678901234567890'
       );
     } catch (ignored) { /* sessionStorage can be unavailable in private mode. */ }
