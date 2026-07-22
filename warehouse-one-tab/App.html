@@ -388,10 +388,26 @@
   function openUsersModal() { resetUserFormState(true); el('usersModal').classList.remove('hidden'); loadUsers(); }
   function closeUsersModal() { el('usersModal').classList.add('hidden'); resetUserFormState(true); }
   async function loadUsers() { el('usersListContainer').innerHTML='<p class="text-xs text-gray-400">جارٍ التحميل…</p>'; try { var r=await rpc('listUsers',state.token,{page:1,pageSize:100}); state.users=r.users||[]; renderUsersList(); }catch(e){el('usersListContainer').innerHTML='<p class="text-xs text-brand-crimson">'+esc(e.message)+'</p>';} }
-  function renderUsersList() { el('usersListContainer').innerHTML=state.users.map(function(u){return '<div class="flex items-center justify-between bg-brand-navy/60 p-3 rounded-xl"><div><strong class="text-xs text-white">'+esc(u.displayName)+'</strong><div class="text-[10px] text-gray-400">'+esc(u.username)+' — '+roleName(u.role)+' — '+(u.active?'نشط':'موقوف')+'</div></div><div><button onclick="editUser(\''+esc(u.id)+'\')" class="text-brand-amber p-1"><i class="fa-solid fa-pen"></i></button><button onclick="resetUserAccess(\''+esc(u.id)+'\')" class="text-brand-neon p-1" title="كلمة مرور مؤقتة"><i class="fa-solid fa-key"></i></button></div></div>';}).join('')||'<p class="text-xs text-gray-400">لا توجد حسابات.</p>'; }
+  function renderUsersList() {
+    el('usersListContainer').innerHTML = state.users.map(function (u) {
+      var actions = '<button type="button" onclick="editUser(\'' + esc(u.id) + '\')" class="inline-flex items-center gap-1.5 rounded-lg border border-brand-amber/25 px-2.5 py-1.5 text-[10px] font-bold text-brand-amber hover:bg-brand-amber/10"><i class="fa-solid fa-pen" aria-hidden="true"></i>تعديل</button>';
+      if (!state.user || u.id !== state.user.id) actions += '<button type="button" onclick="resetUserAccess(\'' + esc(u.id) + '\')" class="inline-flex items-center gap-1.5 rounded-lg border border-brand-neon/25 px-2.5 py-1.5 text-[10px] font-bold text-brand-neon hover:bg-brand-neon/10"><i class="fa-solid fa-key" aria-hidden="true"></i>إعادة تعيين كلمة المرور</button>';
+      return '<div class="grid gap-3 bg-brand-navy/60 p-3 rounded-xl sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"><div><strong class="text-xs text-white">' + esc(u.displayName) + '</strong><div class="text-[10px] text-gray-400">' + esc(u.username) + ' — ' + roleName(u.role) + ' — ' + (u.active ? 'نشط' : 'موقوف') + '</div></div><div class="flex flex-wrap gap-2">' + actions + '</div></div>';
+    }).join('') || '<p class="text-xs text-gray-400">لا توجد حسابات.</p>';
+  }
   async function handleUserSubmit(event) { event.preventDefault(); var id=el('editUserId').value, button=el('userFormSubmitBtn'); busy(button,true,'جارٍ الحفظ…'); try { var r=await rpc('saveUser',state.token,{id:id||undefined,username:el('userNameInput').value.trim(),displayName:el('userDisplayNameInput').value.trim(),role:el('userRoleInput').value,active:el('userActiveInput').value==='true'}); if(r.temporaryPassword){el('temporaryPasswordBox').textContent='كلمة المرور المؤقتة (تُعرض مرة واحدة): '+r.temporaryPassword;el('temporaryPasswordBox').classList.remove('hidden');} else showToast('تم تحديث الحساب.','success'); resetUserFormState(false); await loadUsers();}catch(e){showToast(e.message,'error');}finally{busy(button,false);} }
   function editUser(id){var u=state.users.find(function(x){return x.id===id;});if(!u)return;el('editUserId').value=u.id;el('userNameInput').value=u.username;el('userNameInput').disabled=true;el('userDisplayNameInput').value=u.displayName;el('userRoleInput').value=u.role;el('userActiveInput').value=String(u.active);}
-  async function resetUserAccess(id){try{var r=await rpc('resetUserPassword',state.token,{userId:id});el('temporaryPasswordBox').textContent='كلمة المرور المؤقتة (تُعرض مرة واحدة): '+r.temporaryPassword;el('temporaryPasswordBox').classList.remove('hidden');}catch(e){showToast(e.message,'error');}}
+  function resetUserAccess(id){
+    var user = state.users.find(function (row) { return row.id === id; });
+    if (!user) return;
+    showCustomConfirm('إعادة تعيين كلمة المرور', 'سيتم إلغاء جلسات ' + user.displayName + ' وإنشاء كلمة مرور مؤقتة جديدة. هل تريد المتابعة؟', async function () {
+      try { var r = await rpc('resetUserPassword', state.token, {userId:id}); el('temporaryPasswordBox').textContent = 'كلمة المرور المؤقتة (تُعرض مرة واحدة): ' + r.temporaryPassword; el('temporaryPasswordBox').classList.remove('hidden'); }
+      catch (e) { showToast(e.message, 'error'); }
+    });
+  }
+
+  function openPasswordHelp(){el('passwordHelpModal').classList.remove('hidden');document.body.classList.add('overflow-hidden');var button=el('passwordHelpModal').querySelector('button');if(button)button.focus();}
+  function closePasswordHelp(){el('passwordHelpModal').classList.add('hidden');releaseManagedModalScroll();}
 
   function openBackupModal(){el('backupModal').classList.remove('hidden');} function closeBackupModal(){el('backupModal').classList.add('hidden');}
   async function configureBackup(){var b=el('configureBackupButton');busy(b,true,'جارٍ الحفظ…');try{var r=await rpc('configureBackupFolder',state.token,{folderId:el('backupFolderInput').value});el('backupStatus').textContent='تم اعتماد المجلد: '+r.folderName;}catch(e){el('backupStatus').textContent=e.message;}finally{busy(b,false);}}
@@ -420,14 +436,16 @@
     var itemOpen = !el('itemEditModal').classList.contains('hidden');
     var correctionOpen = !el('movementCorrectionModal').classList.contains('hidden');
     var reportOpen = !el('reportPreviewModal').classList.contains('hidden');
-    if (!itemOpen && !correctionOpen && !reportOpen) document.body.classList.remove('overflow-hidden');
+    var passwordHelpOpen = !el('passwordHelpModal').classList.contains('hidden');
+    if (!itemOpen && !correctionOpen && !reportOpen && !passwordHelpOpen) document.body.classList.remove('overflow-hidden');
   }
   function handleManagedModalKeydown(event) {
-    var modal = !el('movementCorrectionModal').classList.contains('hidden') ? el('movementCorrectionModal') : !el('itemEditModal').classList.contains('hidden') ? el('itemEditModal') : !el('reportPreviewModal').classList.contains('hidden') ? el('reportPreviewModal') : null;
+    var modal = !el('passwordHelpModal').classList.contains('hidden') ? el('passwordHelpModal') : !el('movementCorrectionModal').classList.contains('hidden') ? el('movementCorrectionModal') : !el('itemEditModal').classList.contains('hidden') ? el('itemEditModal') : !el('reportPreviewModal').classList.contains('hidden') ? el('reportPreviewModal') : null;
     if (!modal) return;
     if (event.key === 'Escape') {
       event.preventDefault();
-      if (modal.id === 'movementCorrectionModal') closeMovementCorrectionModal();
+      if (modal.id === 'passwordHelpModal') closePasswordHelp();
+      else if (modal.id === 'movementCorrectionModal') closeMovementCorrectionModal();
       else if (modal.id === 'itemEditModal') closeItemEditModal();
       else closeReportPreview();
       return;
@@ -442,10 +460,10 @@
   document.addEventListener('DOMContentLoaded',function(){
     el('loginForm').addEventListener('submit',handleLogin);el('trxItemSearch').addEventListener('input',debouncedCatalog);el('trxItem').addEventListener('change',updateBalancePreview);el('trxQty').addEventListener('input',updateBalancePreview);el('correctionItemSearch').addEventListener('input',debouncedCorrectionCatalog);document.querySelectorAll('input[name="trxType"]').forEach(function(r){r.addEventListener('change',updateBalancePreview);});
     document.querySelectorAll('[data-password-toggle]').forEach(function(button){button.addEventListener('click',function(){var input=el(button.dataset.passwordToggle);input.type=input.type==='password'?'text':'password';button.querySelector('i').className=input.type==='password'?'fa-solid fa-eye':'fa-solid fa-eye-slash';});});
-    el('itemEditModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closeItemEditModal();});el('movementCorrectionModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closeMovementCorrectionModal();});el('reportPreviewModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closeReportPreview();});document.addEventListener('keydown',handleManagedModalKeydown);
+    el('passwordHelpModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closePasswordHelp();});el('itemEditModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closeItemEditModal();});el('movementCorrectionModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closeMovementCorrectionModal();});el('reportPreviewModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closeReportPreview();});document.addEventListener('keydown',handleManagedModalKeydown);
     validateOrLogin();
   });
 
-  Object.assign(window,{handleLogout:handleLogout,confirmUserSwitch:confirmUserSwitch,filterItemsTable:filterItemsTable,changeItemPageSize:changeItemPageSize,filterAuditTrailTable:filterAuditTrailTable,handleTransactionSubmit:handleTransactionSubmit,editTrx:editTrx,cancelEditTrx:cancelEditTrx,handleMovementCorrectionSubmit:handleMovementCorrectionSubmit,closeMovementCorrectionModal:closeMovementCorrectionModal,deleteTrx:deleteTrx,handleNewItemSubmit:handleNewItemSubmit,handleItemEditSubmit:handleItemEditSubmit,editItem:editItem,cancelEditItem:cancelEditItem,closeItemEditModal:closeItemEditModal,deleteItem:deleteItem,importCatalog:importCatalog,openItemDetailModal:openItemDetailModal,closeItemModal:closeItemModal,printSingleItemReport:printSingleItemReport,openReportPreview:openReportPreview,openFilteredMovementPDF:openFilteredMovementPDF,closeReportPreview:closeReportPreview,triggerPrintPDF:triggerPrintPDF,exportInventoryToCSV:exportInventoryToCSV,exportToCSV:exportToCSV,exportMovementTotalsCSV:exportMovementTotalsCSV,openUsersModal:openUsersModal,closeUsersModal:closeUsersModal,handleUserSubmit:handleUserSubmit,editUser:editUser,resetUserAccess:resetUserAccess,openBackupModal:openBackupModal,closeBackupModal:closeBackupModal,configureBackup:configureBackup,createExcelBackup:createExcelBackup,showCustomConfirm:showCustomConfirm,closeConfirmModal:closeConfirmModal,showToast:showToast});
+  Object.assign(window,{handleLogout:handleLogout,confirmUserSwitch:confirmUserSwitch,openPasswordHelp:openPasswordHelp,closePasswordHelp:closePasswordHelp,filterItemsTable:filterItemsTable,changeItemPageSize:changeItemPageSize,filterAuditTrailTable:filterAuditTrailTable,handleTransactionSubmit:handleTransactionSubmit,editTrx:editTrx,cancelEditTrx:cancelEditTrx,handleMovementCorrectionSubmit:handleMovementCorrectionSubmit,closeMovementCorrectionModal:closeMovementCorrectionModal,deleteTrx:deleteTrx,handleNewItemSubmit:handleNewItemSubmit,handleItemEditSubmit:handleItemEditSubmit,editItem:editItem,cancelEditItem:cancelEditItem,closeItemEditModal:closeItemEditModal,deleteItem:deleteItem,importCatalog:importCatalog,openItemDetailModal:openItemDetailModal,closeItemModal:closeItemModal,printSingleItemReport:printSingleItemReport,openReportPreview:openReportPreview,openFilteredMovementPDF:openFilteredMovementPDF,closeReportPreview:closeReportPreview,triggerPrintPDF:triggerPrintPDF,exportInventoryToCSV:exportInventoryToCSV,exportToCSV:exportToCSV,exportMovementTotalsCSV:exportMovementTotalsCSV,openUsersModal:openUsersModal,closeUsersModal:closeUsersModal,handleUserSubmit:handleUserSubmit,editUser:editUser,resetUserAccess:resetUserAccess,openBackupModal:openBackupModal,closeBackupModal:closeBackupModal,configureBackup:configureBackup,createExcelBackup:createExcelBackup,showCustomConfirm:showCustomConfirm,closeConfirmModal:closeConfirmModal,showToast:showToast});
 })();
 </script>
