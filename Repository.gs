@@ -28,6 +28,7 @@ var REPOSITORY_SCHEMA_ = {
       id: 'معرف الصنف',
       code: 'رمز الصنف',
       name: 'اسم الصنف',
+      owner: 'المالك',
       unit: 'الوحدة',
       openingQuantity: 'الرصيد الافتتاحي',
       reorderLevel: 'حد إعادة الطلب',
@@ -37,7 +38,7 @@ var REPOSITORY_SCHEMA_ = {
       createdBy: 'أنشأه',
       updatedBy: 'حدثه'
     },
-    order: ['id', 'code', 'name', 'unit', 'openingQuantity', 'reorderLevel', 'active', 'createdAt', 'updatedAt', 'createdBy', 'updatedBy']
+    order: ['id', 'code', 'name', 'owner', 'unit', 'openingQuantity', 'reorderLevel', 'active', 'createdAt', 'updatedAt', 'createdBy', 'updatedBy']
   },
   MOVEMENTS: {
     name: 'الحركات',
@@ -113,6 +114,23 @@ function setupRepository_(spreadsheet) {
   });
 }
 
+/**
+ * Apply additive schema migrations once per deployed schema version. This is
+ * called after authentication and makes upgrades safe for existing Sheets;
+ * users do not have to rerun the full first-install flow just to add a column.
+ */
+function ensureRepositorySchemaCurrent_() {
+  var currentVersion = String(getSettingValue_('SCHEMA_VERSION') || '');
+  if (currentVersion === WAREHOUSE_CONFIG_.SCHEMA_VERSION) return false;
+  return withScriptLock_(function () {
+    currentVersion = String(getSettingValue_('SCHEMA_VERSION') || '');
+    if (currentVersion === WAREHOUSE_CONFIG_.SCHEMA_VERSION) return false;
+    setupRepository_(getBoundSpreadsheet_());
+    setSettingValue_('SCHEMA_VERSION', WAREHOUSE_CONFIG_.SCHEMA_VERSION, 'NUMBER', 'إصدار مخطط البيانات', 'SYSTEM');
+    return true;
+  });
+}
+
 function ensureSchemaSheet_(spreadsheet, schemaKey, schema) {
   var sheet = spreadsheet.getSheetByName(schema.name);
   if (!sheet) sheet = spreadsheet.insertSheet(schema.name);
@@ -179,7 +197,7 @@ function styleSchemaSheet_(sheet, schemaKey, schema) {
   ['openingQuantity', 'reorderLevel', 'quantity', 'netChange', 'balanceBefore', 'balanceAfter'].forEach(function (key) {
     var numberColumn = headers.byLabel[schema.columns[key]];
     if (numberColumn && sheet.getMaxRows() > 1) {
-      sheet.getRange(2, numberColumn, sheet.getMaxRows() - 1, 1).setNumberFormat('0.###');
+      sheet.getRange(2, numberColumn, sheet.getMaxRows() - 1, 1).setNumberFormat('0.######');
     }
   });
 
@@ -281,6 +299,27 @@ function appendMappedRow_(schemaKey, valuesByKey) {
   if (rowNumber > table.sheet.getMaxRows()) table.sheet.insertRowAfter(table.sheet.getMaxRows());
   table.sheet.getRange(rowNumber, 1, 1, row.length).setValues([row]);
   return rowNumber;
+}
+
+/** Append multiple mapped records in one Sheets write. */
+function appendMappedRows_(schemaKey, rowsByKey) {
+  if (!Array.isArray(rowsByKey) || !rowsByKey.length) return [];
+  var table = schemaMetadata_(schemaKey);
+  var rows = rowsByKey.map(function (valuesByKey) {
+    var row = table.headers.values.map(function () { return ''; });
+    Object.keys(valuesByKey || {}).forEach(function (key) {
+      var column = table.headers.byLabel[table.schema.columns[key]];
+      if (column) row[column - 1] = safeCellValue_(valuesByKey[key]);
+    });
+    return row;
+  });
+  var firstRow = Math.max(2, table.sheet.getLastRow() + 1);
+  var requiredLastRow = firstRow + rows.length - 1;
+  if (requiredLastRow > table.sheet.getMaxRows()) {
+    table.sheet.insertRowsAfter(table.sheet.getMaxRows(), requiredLastRow - table.sheet.getMaxRows());
+  }
+  table.sheet.getRange(firstRow, 1, rows.length, table.headers.values.length).setValues(rows);
+  return rows.map(function (_row, index) { return firstRow + index; });
 }
 
 function updateMappedRow_(schemaKey, rowNumber, valuesByKey) {
@@ -477,9 +516,28 @@ function createUserRecord_(input) {
 }
 
 function updateUserFields_(user, values) {
+  values = values || {};
+  var securityKeys = ['passwordSalt', 'passwordHash', 'role', 'active', 'failedAttempts', 'lockedUntil', 'sessionVersion', 'forcePasswordChange'];
   values.updatedAt = new Date();
+  var touchesSecurity = securityKeys.some(function (key) { return Object.prototype.hasOwnProperty.call(values, key); });
+  if (touchesSecurity) {
+    // Columns D:N form one contiguous credential/state block through the
+    // update timestamp. Supplying unchanged values makes updateMappedRow_
+    // commit that block in one write,
+    // preventing a new hash from being stored without its session version or
+    // forced-change flag.
+    var completeSecurityBlock = {};
+    securityKeys.concat(['lastLoginAt', 'createdAt', 'updatedAt']).forEach(function (key) {
+      completeSecurityBlock[key] = Object.prototype.hasOwnProperty.call(values, key) ? values[key] : user[key];
+    });
+    Object.keys(values).forEach(function (key) { completeSecurityBlock[key] = values[key]; });
+    values = completeSecurityBlock;
+  }
   updateMappedRow_('USERS', user.rowNumber, values);
-  return findUserById_(user.id);
+  var updated = {};
+  Object.keys(user).forEach(function (key) { updated[key] = user[key]; });
+  Object.keys(values).forEach(function (key) { updated[key] = values[key]; });
+  return updated;
 }
 
 function publicUser_(user) {
@@ -504,6 +562,7 @@ function itemFromTableRow_(table, entry) {
     id: readCellText_(rowValue_(table, row, 'id')),
     code: readCellText_(rowValue_(table, row, 'code')),
     name: readCellText_(rowValue_(table, row, 'name')),
+    owner: readCellText_(rowValue_(table, row, 'owner')),
     unit: readCellText_(rowValue_(table, row, 'unit')),
     openingQuantity: Number(rowValue_(table, row, 'openingQuantity')) || 0,
     reorderLevel: Number(rowValue_(table, row, 'reorderLevel')) || 0,
@@ -543,10 +602,19 @@ function appendItemRecord_(record) {
   return record;
 }
 
+function appendItemRecords_(records) {
+  var rowNumbers = appendMappedRows_('ITEMS', records);
+  records.forEach(function (record, index) { record.rowNumber = rowNumbers[index]; });
+  return records;
+}
+
 function updateItemFields_(item, values) {
   values.updatedAt = new Date();
   updateMappedRow_('ITEMS', item.rowNumber, values);
-  return findItemById_(item.id);
+  var updated = {};
+  Object.keys(item).forEach(function (key) { updated[key] = item[key]; });
+  Object.keys(values).forEach(function (key) { updated[key] = values[key]; });
+  return updated;
 }
 
 function movementFromTableRow_(table, entry) {

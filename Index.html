@@ -205,9 +205,9 @@
             </div>
           </div>
           <form id="movementFilters" class="filter-bar" aria-label="تصفية الحركات">
-            <div class="field field--compact field--grow"><label for="movementQuery">بحث</label><input id="movementQuery" name="query" type="search" placeholder="رقم الحركة، الصنف، المرجع"></div>
+            <div class="field field--compact field--grow"><label for="movementQuery">بحث عام</label><input id="movementQuery" name="query" type="search" placeholder="رقم الحركة، المرجع، الجهة"></div>
             <div class="field field--compact"><label for="movementTypeFilter">نوع الحركة</label><select id="movementTypeFilter" name="type"><option value="">الكل</option><option value="IN">إدخال</option><option value="OUT">صرف</option><option value="REVERSAL">عكس</option></select></div>
-            <div class="field field--compact"><label for="movementItemFilter">الصنف</label><select id="movementItemFilter" name="itemId"><option value="">كل الأصناف</option></select></div>
+            <div class="field field--compact field--grow"><label for="movementItemFilter">الصنف</label><input id="movementItemFilter" name="itemQuery" type="search" placeholder="اسم الصنف أو رمزه أو مالكه" autocomplete="off"></div>
             <div class="field field--compact"><label for="movementDateFrom">من تاريخ</label><input id="movementDateFrom" name="dateFrom" type="date"></div>
             <div class="field field--compact"><label for="movementDateTo">إلى تاريخ</label><input id="movementDateTo" name="dateTo" type="date"></div>
             <button class="button button--secondary filter-submit" type="submit"><svg class="icon"><use href="#icon-filter"></use></svg><span>تطبيق</span></button>
@@ -262,6 +262,7 @@
                     <tr>
                       <th scope="col">الصنف</th>
                       <th scope="col">الرمز</th>
+                      <th scope="col">المالك الحالي</th>
                       <th scope="col">الوحدة</th>
                       <th scope="col">الوارد</th>
                       <th scope="col">الصادر</th>
@@ -293,10 +294,14 @@
         <section id="view-items" class="app-view" data-view="items" aria-labelledby="itemsTitle" hidden>
           <div class="view-heading">
             <div><p class="eyebrow">دليل المستودع</p><h1 id="itemsTitle">الأصناف</h1><p class="muted">الكميات الحالية وحدود إعادة الطلب.</p></div>
-            <button class="button button--primary" type="button" data-action="new-item" data-role-only="ADMIN"><svg class="icon"><use href="#icon-plus"></use></svg><span>إضافة صنف</span></button>
+            <div class="view-heading__actions" data-role-only="ADMIN">
+              <button class="button button--secondary" type="button" data-action="import-provided-catalog"><svg class="icon"><use href="#icon-download"></use></svg><span>إضافة القائمة الجاهزة (76)</span></button>
+              <button class="button button--primary" type="button" data-action="new-item"><svg class="icon"><use href="#icon-plus"></use></svg><span>إضافة صنف</span></button>
+            </div>
           </div>
           <form id="itemFilters" class="filter-bar" aria-label="تصفية الأصناف">
-            <div class="field field--compact field--grow"><label for="itemQuery">بحث</label><input id="itemQuery" name="query" type="search" placeholder="اسم الصنف أو رمزه"></div>
+            <div class="field field--compact field--grow"><label for="itemQuery">بحث</label><input id="itemQuery" name="query" type="search" placeholder="اسم الصنف أو رمزه أو مالكه"></div>
+            <div class="field field--compact"><label for="itemOwnerFilter">المالك</label><select id="itemOwnerFilter" name="owner"><option value="">كل المالكين</option></select></div>
             <div class="field field--compact"><label for="itemStatusFilter">الحالة</label><select id="itemStatusFilter" name="status"><option value="">الكل</option><option value="AVAILABLE">متوفر</option><option value="LOW">منخفض</option><option value="OUT">نافد</option></select></div>
             <button class="button button--secondary filter-submit" type="submit"><svg class="icon"><use href="#icon-filter"></use></svg><span>تطبيق</span></button>
             <button class="button button--ghost filter-reset" type="reset">مسح</button>
@@ -305,7 +310,7 @@
           <div class="table-frame">
             <table>
               <caption class="sr-only">قائمة أصناف المخزون</caption>
-              <thead><tr><th scope="col">الرمز</th><th scope="col">الصنف</th><th scope="col">الوحدة</th><th scope="col">الكمية الحالية</th><th scope="col">الحد الأدنى</th><th scope="col">الحالة</th><th scope="col"><span class="sr-only">إجراءات</span></th></tr></thead>
+              <thead><tr><th scope="col">الرمز</th><th scope="col">الصنف</th><th scope="col">المالك</th><th scope="col">الوحدة</th><th scope="col">الكمية الحالية</th><th scope="col">الحد الأدنى</th><th scope="col">الحالة</th><th scope="col"><span class="sr-only">إجراءات</span></th></tr></thead>
               <tbody id="itemsTableBody"></tbody>
             </table>
           </div>
@@ -338,7 +343,7 @@
           <article class="panel report-table-panel">
             <div class="panel-heading"><div><h2>حالة الأصناف الحالية</h2></div></div>
             <div id="reportState" class="section-state" role="status" aria-live="polite"></div>
-            <div class="table-frame table-frame--embedded"><table><caption class="sr-only">تقرير حالة الأصناف</caption><thead><tr><th scope="col">الرمز</th><th scope="col">الصنف</th><th scope="col">الكمية</th><th scope="col">الحد الأدنى</th><th scope="col">الحالة</th></tr></thead><tbody id="reportTableBody"></tbody></table></div>
+            <div class="table-frame table-frame--embedded"><table><caption class="sr-only">تقرير حالة الأصناف</caption><thead><tr><th scope="col">الرمز</th><th scope="col">الصنف</th><th scope="col">المالك</th><th scope="col">الكمية</th><th scope="col">الحد الأدنى</th><th scope="col">الحالة</th></tr></thead><tbody id="reportTableBody"></tbody></table></div>
           </article>
         </section>
 
@@ -396,7 +401,7 @@
       <p class="muted">لن تظهر بيانات النظام قبل استبدال كلمة المرور المؤقتة.</p>
       <form id="passwordChangeForm" novalidate>
         <div class="field"><label for="currentPassword">كلمة المرور الحالية</label><div class="input-shell"><input id="currentPassword" name="currentPassword" type="password" dir="ltr" autocomplete="current-password" autocapitalize="none" spellcheck="false" required aria-describedby="currentPasswordError"><button class="icon-button input-action" type="button" data-password-toggle="currentPassword" aria-label="إظهار كلمة المرور" aria-pressed="false"><svg class="icon"><use href="#icon-eye"></use></svg></button></div><p id="currentPasswordError" class="field-error" aria-live="polite"></p></div>
-        <div class="field"><label for="newPassword">كلمة المرور الجديدة</label><div class="input-shell"><input id="newPassword" name="newPassword" type="password" dir="ltr" autocomplete="new-password" autocapitalize="none" spellcheck="false" minlength="12" required aria-describedby="newPasswordHelp newPasswordError"><button class="icon-button input-action" type="button" data-password-toggle="newPassword" aria-label="إظهار كلمة المرور" aria-pressed="false"><svg class="icon"><use href="#icon-eye"></use></svg></button></div><p id="newPasswordHelp" class="field-help">12 محرفاً على الأقل، مع حرف كبير وصغير ورقم ورمز.</p><div id="passwordStrength" class="password-strength" aria-live="polite"><span class="strength-track" aria-hidden="true"><span></span></span><span class="strength-label">لم تُكتب كلمة المرور بعد</span></div><p id="newPasswordError" class="field-error" aria-live="polite"></p></div>
+        <div class="field"><label for="newPassword">كلمة المرور الجديدة</label><div class="input-shell"><input id="newPassword" name="newPassword" type="password" dir="ltr" autocomplete="new-password" autocapitalize="none" spellcheck="false" minlength="6" maxlength="256" required aria-describedby="newPasswordHelp newPasswordError"><button class="icon-button input-action" type="button" data-password-toggle="newPassword" aria-label="إظهار كلمة المرور" aria-pressed="false"><svg class="icon"><use href="#icon-eye"></use></svg></button></div><p id="newPasswordHelp" class="field-help">اختر أي كلمة مرور تريدها، على ألا تقل عن 6 محارف.</p><div id="passwordStrength" class="password-strength" aria-live="polite"><span class="strength-track" aria-hidden="true"><span></span></span><span class="strength-label">لم تُكتب كلمة المرور بعد</span></div><p id="newPasswordError" class="field-error" aria-live="polite"></p></div>
         <div class="field"><label for="confirmPassword">تأكيد كلمة المرور الجديدة</label><div class="input-shell"><input id="confirmPassword" name="confirmPassword" type="password" dir="ltr" autocomplete="new-password" autocapitalize="none" spellcheck="false" required aria-describedby="confirmPasswordError"><button class="icon-button input-action" type="button" data-password-toggle="confirmPassword" aria-label="إظهار كلمة المرور" aria-pressed="false"><svg class="icon"><use href="#icon-eye"></use></svg></button></div><p id="confirmPasswordError" class="field-error" aria-live="polite"></p></div>
         <div id="passwordChangeError" class="inline-alert inline-alert--error" role="alert" hidden></div>
         <button id="passwordChangeSubmit" class="button button--primary button--block" type="submit"><span class="button__label">حفظ كلمة المرور والمتابعة</span><span class="button__spinner" aria-hidden="true"></span></button>

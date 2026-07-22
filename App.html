@@ -42,6 +42,7 @@
     sessionGeneration: 0,
     listRequestIds: { items: 0, movements: 0, users: 0 },
     catalogItems: [],
+    itemOwners: [],
     itemCatalog: { total: 0, activeTotal: 0, returned: 0, truncated: false },
     items: [],
     movements: [],
@@ -95,7 +96,7 @@
       'movementReportItemsTable', 'movementReportItemsBody', 'exportMovementExcel',
       'exportMovementPdf',
       'movementsPagination', 'movementsPrev', 'movementsNext', 'movementsPageText',
-      'itemFilters', 'itemQuery', 'itemStatusFilter', 'itemsState', 'itemsTableBody',
+      'itemFilters', 'itemQuery', 'itemOwnerFilter', 'itemStatusFilter', 'itemsState', 'itemsTableBody',
       'itemsPagination', 'itemsPrev', 'itemsNext', 'itemsPageText', 'csvDataset',
       'csvScopeNote', 'exportCsvButton', 'createBackupButton', 'backupResult', 'reportState',
       'reportTableBody', 'userFilters', 'userQuery', 'userStatusFilter', 'usersState',
@@ -376,12 +377,7 @@
       newPassword: function (input) {
         var value = input.value;
         if (!value) return 'كلمة المرور الجديدة مطلوبة.';
-        if (value.length < 12 || !/[a-z]/.test(value) || !/[A-Z]/.test(value) || !/[0-9]/.test(value) || !/[^A-Za-z0-9]/.test(value)) {
-          return 'استخدم 12 محرفاً على الأقل، مع حرف كبير وصغير ورقم ورمز.';
-        }
-        if (state.user && state.user.username && value.toLowerCase().indexOf(String(state.user.username).toLowerCase()) !== -1) {
-          return 'لا تُضمّن اسم المستخدم في كلمة المرور.';
-        }
+        if (value.length < 6) return 'استخدم 6 محارف على الأقل.';
         return '';
       },
       confirmPassword: function (input) {
@@ -393,14 +389,8 @@
 
   function updatePasswordStrength() {
     var value = dom.newPassword.value || '';
-    var checks = [
-      value.length >= 12,
-      /[a-z]/.test(value) && /[A-Z]/.test(value),
-      /[0-9]/.test(value),
-      /[^A-Za-z0-9]/.test(value)
-    ];
-    var level = value ? checks.filter(Boolean).length : 0;
-    var labels = ['لم تُكتب كلمة المرور بعد', 'ضعيفة', 'مقبولة جزئياً', 'جيدة', 'قوية'];
+    var level = !value ? 0 : value.length < 6 ? 1 : 4;
+    var labels = ['لم تُكتب كلمة المرور بعد', 'قصيرة جداً', '', '', 'مقبولة'];
     dom.passwordStrength.setAttribute('data-level', String(level));
     dom.passwordStrength.querySelector('.strength-label').textContent = labels[level];
     if (dom.confirmPassword.dataset.touched === 'true') validateField(dom.confirmPassword, passwordValidators());
@@ -469,6 +459,7 @@
     state.listRequestIds.users += 1;
     state.dashboardLoading = false;
     state.catalogItems = [];
+    state.itemOwners = [];
     state.itemCatalog = { total: 0, activeTotal: 0, returned: 0, truncated: false };
     state.items = [];
     state.movements = [];
@@ -497,6 +488,7 @@
     dom.movementDateFrom.value = '';
     dom.movementDateTo.value = '';
     dom.itemQuery.value = '';
+    dom.itemOwnerFilter.value = '';
     dom.itemStatusFilter.value = '';
     dom.userQuery.value = '';
     dom.userStatusFilter.value = '';
@@ -528,7 +520,6 @@
     applyRoleVisibility();
     renderUserIdentity();
     renderDashboard();
-    renderMovementItemOptions();
     renderReport();
     navigate(viewFromHash(), { updateHash: false, focus: false });
     window.scrollTo({ top: 0, behavior: 'auto' });
@@ -541,12 +532,14 @@
     state.permissions = data.permissions || null;
     state.dashboard = data.dashboard || null;
     state.catalogItems = normalizeCollection(data.items, 'items');
+    state.itemOwners = Array.isArray(data.owners) ? data.owners.slice() : ownerOptionsFromItems(state.catalogItems);
     state.itemCatalog = Object.assign({ total: state.catalogItems.length, activeTotal: state.catalogItems.filter(function (item) { return item.active !== false; }).length, returned: state.catalogItems.length, truncated: false }, data.itemCatalog || {});
     if (!state.loaded.items) state.items = state.catalogItems.slice();
     state.recentMovements = normalizeCollection(data.recentMovements, 'movements');
     state.movements = state.recentMovements.slice();
     state.loaded.dashboard = true;
     state.dashboardLoadedDays = state.dashboard && state.dashboard.range && Number(state.dashboard.range.days) || (state.dashboard ? DASHBOARD_DEFAULT_DAYS : 0);
+    renderItemOwnerOptions(state.itemOwners);
   }
 
   function normalizeCollection(value, key) {
@@ -625,6 +618,7 @@
     else if (action === 'movement-out') openMovementForm(source, 'OUT');
     else if (action === 'new-movement') openMovementForm(source, 'IN');
     else if (action === 'new-item') openItemForm(null, source);
+    else if (action === 'import-provided-catalog') openProvidedCatalogImport(source);
     else if (action === 'new-user') openUserForm(null, source);
   }
 
@@ -1008,7 +1002,7 @@
     clearNode(dom.urgentItems);
     var rows = urgentItemsForDashboard(dashboard).slice(0, 8);
     if (!rows.length) {
-      dom.urgentItems.appendChild(emptyState('check', 'لا توجد أصناف منخفضة أو نافدة حالياً.'));
+      dom.urgentItems.appendChild(emptyState('check', 'لا توجد أصناف منخفضة أو نافدة أو أرصدة غير طبيعية حالياً.'));
       return;
     }
     var list = createElement('div', 'urgent-list');
@@ -1043,7 +1037,7 @@
     return rows.slice().sort(function (a, b) {
       var aStatus = itemStatus(a).key;
       var bStatus = itemStatus(b).key;
-      if (aStatus !== bStatus) return aStatus === 'OUT' ? -1 : 1;
+      if (aStatus !== bStatus) return aStatus === 'INACTIVE' ? -1 : (bStatus === 'INACTIVE' ? 1 : (aStatus === 'OUT' ? -1 : 1));
       var aLevel = Number(a.reorderLevel) || 0;
       var bLevel = Number(b.reorderLevel) || 0;
       var aCoverage = aLevel > 0 ? itemQuantity(a) / aLevel : Number.POSITIVE_INFINITY;
@@ -1055,7 +1049,7 @@
   function openUrgentItem(item, status) {
     var wasLoaded = state.loaded.items;
     dom.itemQuery.value = item.code || item.name || '';
-    dom.itemStatusFilter.value = status.key === 'OUT' ? 'OUT' : 'LOW';
+    dom.itemStatusFilter.value = status.key === 'INACTIVE' ? '' : (status.key === 'OUT' ? 'OUT' : 'LOW');
     state.paging.items.page = 1;
     navigate('items', { focus: true });
     if (wasLoaded) loadItems();
@@ -1153,18 +1147,17 @@
     var params = {
       query: dom.movementQuery.value.trim(),
       type: dom.movementTypeFilter.value,
-      itemId: dom.movementItemFilter.value,
+      itemQuery: dom.movementItemFilter.value.trim(),
       dateFrom: dom.movementDateFrom.value,
       dateTo: dom.movementDateTo.value,
       page: state.paging.movements.page,
       pageSize: state.paging.movements.pageSize
     };
-    var selectedItemOption = dom.movementItemFilter.options[dom.movementItemFilter.selectedIndex];
     var reportParams = {
       query: params.query,
       type: params.type,
-      itemId: params.itemId,
-      itemLabel: selectedItemOption ? selectedItemOption.textContent : 'كل الأصناف',
+      itemQuery: params.itemQuery,
+      itemLabel: params.itemQuery || 'كل الأصناف',
       dateFrom: params.dateFrom,
       dateTo: params.dateTo
     };
@@ -1252,6 +1245,7 @@
       var tr = document.createElement('tr');
       addCell(tr, 'الصنف', itemRow.itemName || '—');
       addCell(tr, 'الرمز', itemRow.itemCode || '—', { code: true });
+      addCell(tr, 'المالك', itemRow.owner || 'غير محدد');
       addCell(tr, 'الوحدة', itemRow.unit || 'غير محددة');
       addCell(tr, 'إجمالي الوارد', formatNumber(itemRow.incoming), { mono: true });
       addCell(tr, 'إجمالي الصادر', formatNumber(itemRow.outgoing), { mono: true });
@@ -1267,7 +1261,7 @@
     if (!summary.byItem.length) {
       var emptyRow = document.createElement('tr');
       var emptyCell = createText('td', 'table-empty-cell', 'لا توجد أصناف ضمن التقرير الحالي.');
-      emptyCell.colSpan = 8;
+      emptyCell.colSpan = 9;
       emptyRow.appendChild(emptyCell);
       dom.movementReportItemsBody.appendChild(emptyRow);
     }
@@ -1333,6 +1327,7 @@
   function loadItems() {
     var params = {
       query: dom.itemQuery.value.trim(),
+      owner: dom.itemOwnerFilter.value,
       status: dom.itemStatusFilter.value,
       page: state.paging.items.page,
       pageSize: state.paging.items.pageSize
@@ -1342,12 +1337,15 @@
     return rpc('listItems', params).then(function (data) {
       var rows = normalizeCollection(data, 'items');
       state.items = rows;
+      if (data && Array.isArray(data.owners)) {
+        state.itemOwners = data.owners.slice();
+        renderItemOwnerOptions(state.itemOwners);
+      }
       state.lastResponses.items = data || {};
       state.loaded.items = true;
       applyPaging('items', data || {}, rows.length);
       clearNode(dom.itemsState);
       renderItemsTable(rows);
-      renderMovementItemOptions();
       renderReport();
       renderDashboard();
       updatePagination('items');
@@ -1364,6 +1362,7 @@
       var tr = document.createElement('tr');
       addCell(tr, 'الرمز', item.code || '—', { code: true });
       addCell(tr, 'الصنف', item.name || '—');
+      addCell(tr, 'المالك', item.owner || 'غير محدد');
       addCell(tr, 'الوحدة', item.unit || '—');
       addCell(tr, 'الكمية الحالية', formatNumber(itemQuantity(item)), { mono: true });
       addCell(tr, 'الحد الأدنى', formatNumber(item.reorderLevel || 0), { mono: true });
@@ -1380,6 +1379,30 @@
       tr.appendChild(actions);
       dom.itemsTableBody.appendChild(tr);
     });
+  }
+
+  function ownerOptionsFromItems(items) {
+    var seen = Object.create(null);
+    (items || []).forEach(function (item) {
+      var owner = String(item && item.owner || '').trim();
+      if (owner) seen[owner] = true;
+    });
+    return Object.keys(seen).sort(function (a, b) { return a.localeCompare(b, 'ar'); });
+  }
+
+  function renderItemOwnerOptions(owners) {
+    if (!dom.itemOwnerFilter) return;
+    var current = dom.itemOwnerFilter.value;
+    while (dom.itemOwnerFilter.options.length > 1) dom.itemOwnerFilter.remove(1);
+    (owners || []).forEach(function (owner) {
+      var option = document.createElement('option');
+      option.value = owner;
+      option.textContent = owner;
+      dom.itemOwnerFilter.appendChild(option);
+    });
+    if (Array.prototype.some.call(dom.itemOwnerFilter.options, function (option) { return option.value === current; })) {
+      dom.itemOwnerFilter.value = current;
+    }
   }
 
   function loadUsers() {
@@ -1465,18 +1488,6 @@
     dom.mainContent.focus({ preventScroll: true });
   }
 
-  function renderMovementItemOptions() {
-    var current = dom.movementItemFilter.value;
-    while (dom.movementItemFilter.options.length > 1) dom.movementItemFilter.remove(1);
-    state.catalogItems.forEach(function (item) {
-      var option = document.createElement('option');
-      option.value = item.id;
-      option.textContent = item.name + (item.code ? ' — ' + item.code : '');
-      dom.movementItemFilter.appendChild(option);
-    });
-    if (Array.prototype.some.call(dom.movementItemFilter.options, function (option) { return option.value === current; })) dom.movementItemFilter.value = current;
-  }
-
   function renderReport() {
     clearNode(dom.reportState);
     clearNode(dom.reportTableBody);
@@ -1494,6 +1505,7 @@
       var tr = document.createElement('tr');
       addCell(tr, 'الرمز', item.code || '—', { code: true });
       addCell(tr, 'الصنف', item.name || '—');
+      addCell(tr, 'المالك', item.owner || 'غير محدد');
       addCell(tr, 'الكمية', formatNumber(itemQuantity(item)), { mono: true });
       addCell(tr, 'الحد الأدنى', formatNumber(item.reorderLevel || 0), { mono: true });
       addCell(tr, 'الحالة', stockStatusBadge(item));
@@ -1671,9 +1683,10 @@
         reference: referenceField.input.value.trim(),
         notes: notesField.input.value.trim(),
         clientRequestId: clientRequestId
-      }).then(function () {
+      }).then(function (result) {
         dom.entityDialog.close();
         announce(typeField.value() === 'IN' ? 'تم تسجيل إدخال المخزون.' : 'تم تسجيل صرف المخزون.');
+        showAuditWarning(result);
         return refreshAfterInventoryMutation();
       }).catch(function (error) {
         if (handlePossibleAuthError(error)) return;
@@ -1769,7 +1782,7 @@
         item: item,
         index: index,
         label: itemLabel,
-        searchText: searchable([item.code, item.name, item.unit, itemLabel])
+        searchText: searchable([item.code, item.name, item.owner, item.unit, itemLabel])
       };
     });
     var filtered = [];
@@ -1830,7 +1843,7 @@
           option.setAttribute('aria-selected', selected && selected.id === entry.item.id ? 'true' : 'false');
           option.tabIndex = -1;
           var identity = createElement('span', 'combobox-option__identity');
-          append(identity, createText('strong', '', entry.item.name || entry.item.code || 'صنف غير مسمى'), createText('span', '', entry.item.code || 'بدون رمز'));
+          append(identity, createText('strong', '', entry.item.name || entry.item.code || 'صنف غير مسمى'), createText('span', '', (entry.item.code || 'بدون رمز') + (entry.item.owner ? ' · ' + entry.item.owner : '')));
           var balance = createText('span', 'combobox-option__balance mono', formatNumber(itemQuantity(entry.item)) + (entry.item.unit ? ' ' + entry.item.unit : ''));
           append(option, identity, balance, stockStatusBadge(entry.item));
           option.addEventListener('pointerdown', function (event) { event.preventDefault(); });
@@ -1863,7 +1876,7 @@
               item: item,
               index: 'Remote' + index,
               label: itemLabel,
-              searchText: searchable([item.code, item.name, item.unit, itemLabel])
+              searchText: searchable([item.code, item.name, item.owner, item.unit, itemLabel])
             };
           });
           renderOptionRows(remoteEntries);
@@ -1946,7 +1959,8 @@
     var facts = createElement('dl', 'movement-context__facts');
     [
       { label: 'الرصيد الحالي', value: formatNumber(before) + (unit ? ' ' + unit : '') },
-      { label: 'حد إعادة الطلب', value: formatNumber(item.reorderLevel || 0) + (unit ? ' ' + unit : '') }
+      { label: 'حد إعادة الطلب', value: formatNumber(item.reorderLevel || 0) + (unit ? ' ' + unit : '') },
+      { label: 'المالك', value: item.owner || 'غير محدد' }
     ].forEach(function (fact) {
       var row = document.createElement('div');
       append(row, createText('dt', '', fact.label), createText('dd', 'mono', fact.value));
@@ -1986,9 +2000,10 @@
       event.preventDefault();
       if (!validateForm(form)) return;
       setLoading(submit, true);
-      rpc('reverseMovement', { movementId: movement.id, reason: reasonField.input.value.trim(), clientRequestId: clientRequestId }).then(function () {
+      rpc('reverseMovement', { movementId: movement.id, reason: reasonField.input.value.trim(), clientRequestId: clientRequestId }).then(function (result) {
         dom.entityDialog.close();
         announce('تم إنشاء حركة العكس.');
+        showAuditWarning(result);
         return refreshAfterInventoryMutation();
       }).catch(function (error) {
         if (handlePossibleAuthError(error)) return;
@@ -1999,6 +2014,44 @@
     openEntityDialog('عكس حركة', 'تصحيح موثّق', wrapper, source);
   }
 
+  function openProvidedCatalogImport(source) {
+    if (!state.user || state.user.role !== 'ADMIN') return;
+    var wrapper = document.createElement('div');
+    wrapper.appendChild(createText('p', 'muted', 'سيضيف النظام القائمة الجاهزة من ITEM001 إلى ITEM076 مع الرصيد والمالك المحددين.'));
+    var facts = createElement('ul', 'import-facts');
+    [
+      'عدد الأصناف في القائمة: 76 صنفاً.',
+      'وحدة القياس الافتراضية: قطعة، وحد إعادة الطلب: 0.',
+      'أي رمز أو اسم موجود مسبقاً سيُتخطّى ولن تتغير بياناته أو رصيده.'
+    ].forEach(function (copy) { facts.appendChild(createText('li', '', copy)); });
+    var form = document.createElement('form');
+    var submit = addFormActions(form, 'إضافة الأصناف الآن');
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      setLoading(submit, true);
+      rpc('importProvidedCatalog', {}).then(function (result) {
+        result = result || {};
+        dom.entityDialog.close();
+        state.paging.items.page = 1;
+        var message = 'أُضيف ' + formatNumber(result.created || 0) + ' صنفاً، وتُخطّي ' + formatNumber(result.skipped || 0) + ' صنف موجود أو متعارض.';
+        if (Array.isArray(result.conflictingCodes) && result.conflictingCodes.length) {
+          message += ' عناصر تحتاج مراجعة: ' + result.conflictingCodes.join('، ') + '.';
+        }
+        var auditMessage = auditWarningMessage(result);
+        if (auditMessage) message += ' ' + auditMessage;
+        var importTone = result.conflictingCodes && result.conflictingCodes.length ? 'error' : (auditMessage ? 'warning' : 'success');
+        showToast(result.created ? 'تمت إضافة قائمة الأصناف' : 'القائمة موجودة مسبقاً', message, importTone);
+        announce(message);
+        return refreshAfterInventoryMutation();
+      }).catch(function (error) {
+        if (handlePossibleAuthError(error)) return;
+        showFormServerError(form, error);
+      }).finally(function () { setLoading(submit, false); });
+    });
+    append(wrapper, facts, form);
+    openEntityDialog('إضافة القائمة الجاهزة', 'استيراد آمن بلا تكرار', wrapper, source);
+  }
+
   function openItemForm(item, source) {
     if (!state.user || state.user.role !== 'ADMIN') return;
     var editing = !!item;
@@ -2006,6 +2059,7 @@
     form.noValidate = true;
     var codeField = createField({ id: 'itemCodeField', name: 'code', label: 'رمز الصنف', type: 'text', required: true, maxLength: 50, value: item && item.code, auto: true });
     var nameField = createField({ id: 'itemNameField', name: 'name', label: 'اسم الصنف', type: 'text', required: true, maxLength: 150, value: item && item.name });
+    var ownerField = createField({ id: 'itemOwnerField', name: 'owner', label: 'المالك', type: 'text', required: true, maxLength: 100, value: item && item.owner, help: 'مثال: سلطة المياه أو مصلحة المياه.' });
     var unitField = createField({ id: 'itemUnitField', name: 'unit', label: 'وحدة القياس', type: 'text', required: true, maxLength: 40, value: item && item.unit });
     var reorderField = createField({ id: 'itemReorderField', name: 'reorderLevel', label: 'حد إعادة الطلب', type: 'number', min: '0', step: 'any', required: true, inputMode: 'decimal', value: item && item.reorderLevel !== undefined ? item.reorderLevel : 0 });
     var activeField = createField({
@@ -2013,7 +2067,7 @@
       value: !item || item.active !== false ? 'true' : 'false',
       options: [{ value: 'true', label: 'نشط' }, { value: 'false', label: 'موقوف' }]
     });
-    append(form, codeField.wrap, nameField.wrap, unitField.wrap, reorderField.wrap, activeField.wrap);
+    append(form, codeField.wrap, nameField.wrap, ownerField.wrap, unitField.wrap, reorderField.wrap, activeField.wrap);
     var openingField = null;
     if (!editing) {
       openingField = createField({ id: 'itemOpeningField', name: 'openingQuantity', label: 'الكمية الافتتاحية', type: 'number', min: '0', step: 'any', required: true, inputMode: 'decimal', value: 0, help: 'بعد الإنشاء تُعدّل الكمية عبر الحركات فقط.' });
@@ -2027,6 +2081,7 @@
       var payload = {
         code: codeField.input.value.trim(),
         name: nameField.input.value.trim(),
+        owner: ownerField.input.value.trim(),
         unit: unitField.input.value.trim(),
         reorderLevel: Number(reorderField.input.value),
         active: activeField.input.value === 'true'
@@ -2034,9 +2089,10 @@
       if (editing) payload.id = item.id;
       else payload.openingQuantity = Number(openingField.input.value);
       setLoading(submit, true);
-      rpc('saveItem', payload).then(function () {
+      rpc('saveItem', payload).then(function (result) {
         dom.entityDialog.close();
         announce(editing ? 'تم تحديث الصنف.' : 'تم إنشاء الصنف.');
+        showAuditWarning(result);
         state.paging.items.page = 1;
         return refreshAfterInventoryMutation();
       }).catch(function (error) {
@@ -2129,7 +2185,6 @@
     return rpc('getBootstrap', {}).then(function (data) {
       applyBootstrap(data);
       renderDashboard();
-      renderMovementItemOptions();
       renderReport();
       if (state.currentView === 'dashboard' && state.dashboardLoadedDays !== state.dashboardDays) return loadDashboard(true);
       if (state.currentView === 'movements') return loadMovements();
@@ -2230,9 +2285,9 @@
       });
       fileStem = 'حركات-المخزون';
     } else {
-      headers = ['رمز الصنف', 'اسم الصنف', 'الوحدة', 'الكمية الحالية', 'حد إعادة الطلب', 'الحالة', 'نشط'];
+      headers = ['رمز الصنف', 'اسم الصنف', 'المالك', 'الوحدة', 'الكمية الحالية', 'حد إعادة الطلب', 'الحالة', 'نشط'];
       rows = state.items.map(function (item) {
-        return [item.code, item.name, item.unit, itemQuantity(item), item.reorderLevel, itemStatus(item).label, item.active === false ? 'لا' : 'نعم'];
+        return [item.code, item.name, item.owner || 'غير محدد', item.unit, itemQuantity(item), item.reorderLevel, itemStatus(item).label, item.active === false ? 'لا' : 'نعم'];
       });
       fileStem = 'الأصناف';
     }
@@ -2288,11 +2343,12 @@
     });
     rows.push([]);
     rows.push(['الإجماليات والمتبقي حسب الصنف']);
-    rows.push(['رمز الصنف', 'اسم الصنف', 'الوحدة', 'إجمالي الوارد', 'إجمالي الصادر', 'أثر العكس', 'صافي النطاق', 'الرصيد الحالي']);
+    rows.push(['رمز الصنف', 'اسم الصنف', 'المالك الحالي', 'الوحدة', 'إجمالي الوارد', 'إجمالي الصادر', 'أثر العكس', 'صافي النطاق', 'الرصيد الحالي']);
     summary.byItem.forEach(function (itemRow) {
       rows.push([
         itemRow.itemCode || '',
         itemRow.itemName || '',
+        itemRow.owner || 'غير محدد',
         itemRow.unit || 'غير محددة',
         numericExportValue(itemRow.incoming),
         numericExportValue(itemRow.outgoing),
@@ -2374,18 +2430,18 @@
     main.appendChild(buildPdfTable(doc,
       ['الوحدة', 'إجمالي الوارد', 'إجمالي الصادر', 'أثر العكس', 'صافي النطاق', 'الرصيد الحالي'],
       summary.byUnit.map(function (unitRow) {
-        return [unitRow.unit || 'غير محددة', unitRow.incoming, unitRow.outgoing, unitRow.reversalNet, unitRow.net, formatOptionalNumber(unitRow.currentBalance)];
+        return [unitRow.unit || 'غير محددة', unitRow.incoming, unitRow.outgoing, unitRow.reversalNet, unitRow.net, unitRow.currentBalance];
       }),
       [1, 2, 3, 4, 5]
     ));
 
     main.appendChild(pdfText(doc, 'h2', 'الإجماليات والمتبقي حسب الصنف'));
     main.appendChild(buildPdfTable(doc,
-      ['الرمز', 'الصنف', 'الوحدة', 'إجمالي الوارد', 'إجمالي الصادر', 'أثر العكس', 'صافي النطاق', 'الرصيد الحالي'],
+      ['الرمز', 'الصنف', 'المالك الحالي', 'الوحدة', 'إجمالي الوارد', 'إجمالي الصادر', 'أثر العكس', 'صافي النطاق', 'الرصيد الحالي'],
       summary.byItem.map(function (itemRow) {
-        return [itemRow.itemCode || '—', itemRow.itemName || '—', itemRow.unit || 'غير محددة', itemRow.incoming, itemRow.outgoing, itemRow.reversalNet, itemRow.net, formatOptionalNumber(itemRow.currentBalance)];
+        return [itemRow.itemCode || '—', itemRow.itemName || '—', itemRow.owner || 'غير محدد', itemRow.unit || 'غير محددة', itemRow.incoming, itemRow.outgoing, itemRow.reversalNet, itemRow.net, itemRow.currentBalance];
       }),
-      [3, 4, 5, 6, 7]
+      [4, 5, 6, 7, 8]
     ));
     doc.body.appendChild(main);
 
@@ -2460,8 +2516,9 @@
     rows.forEach(function (row) {
       var tr = doc.createElement('tr');
       row.forEach(function (value, index) {
-        var cell = pdfText(doc, 'td', numericColumns.indexOf(index) === -1 ? value : formatNumber(value));
-        if (numericColumns.indexOf(index) !== -1) cell.className = 'number';
+        var isNumeric = numericColumns.indexOf(index) !== -1;
+        var cell = pdfText(doc, 'td', isNumeric ? formatOptionalNumber(value) : value);
+        if (isNumeric) cell.className = 'number';
         tr.appendChild(cell);
       });
       body.appendChild(tr);
@@ -2481,8 +2538,9 @@
   }
 
   function csvCell(value) {
+    var isText = typeof value === 'string';
     var text = value === null || value === undefined ? '' : String(value);
-    if (/^[\s]*[=+\-@]/.test(text)) text = "'" + text;
+    if (isText && /^[\s]*[=+\-@]/.test(text)) text = "'" + text;
     return '"' + text.replace(/"/g, '""') + '"';
   }
 
@@ -2589,9 +2647,9 @@
 
     if (query) {
       var items = state.catalogItems.filter(function (item) {
-        return searchable([item.name, item.code, item.unit]).indexOf(query) !== -1;
+        return searchable([item.name, item.code, item.owner, item.unit]).indexOf(query) !== -1;
       }).slice(0, 5).map(function (item) {
-        return { icon: 'items', title: item.name || item.code, subtitle: item.code || item.unit || '', action: { kind: 'item', item: item } };
+        return { icon: 'items', title: item.name || item.code, subtitle: (item.code || item.unit || '') + (item.owner ? ' · ' + item.owner : ''), action: { kind: 'item', item: item } };
       });
       if (items.length) groups.push({ title: 'الأصناف', rows: items });
 
@@ -2921,6 +2979,20 @@
     element.hidden = true;
   }
 
+  function auditWarningMessage(result) {
+    var warning = result && result.auditWarning;
+    if (!warning) return '';
+    if (typeof warning === 'string') return warning;
+    return warning.message ? String(warning.message) : '';
+  }
+
+  function showAuditWarning(result) {
+    var message = auditWarningMessage(result);
+    if (!message) return;
+    showToast('تمت العملية مع تنبيه تدقيق', message, 'warning');
+    announce(message);
+  }
+
   function showToast(title, message, tone) {
     var toast = createElement('div', 'toast' + (tone ? ' toast--' + tone : ''));
     toast.setAttribute('role', tone === 'error' ? 'alert' : 'status');
@@ -3023,7 +3095,7 @@
   function formatNumber(value) {
     var number = Number(value);
     if (!isFinite(number)) return '—';
-    try { return new Intl.NumberFormat('ar', { maximumFractionDigits: 3 }).format(number); }
+    try { return new Intl.NumberFormat('ar', { maximumFractionDigits: 6 }).format(number); }
     catch (ignored) { return String(number); }
   }
 

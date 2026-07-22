@@ -33,11 +33,13 @@ function getBootstrap(token) {
         passwordChangeRequired: true,
         dashboard: null,
         items: [],
+        owners: [],
         itemCatalog: { total: 0, returned: 0, truncated: false, limit: DASHBOARD_CONFIG_.BOOTSTRAP_CATALOG_LIMIT, unavailableUntilPasswordChange: true },
         recentMovements: [],
         settings: publicSettings_()
       };
     }
+    ensureRepositorySchemaCurrent_();
     var data = inventorySnapshot_(DASHBOARD_CONFIG_.DEFAULT_DAYS);
     var dashboard = dashboardFromSnapshot_(data);
     var catalog = bootstrapItemCatalog_(data);
@@ -47,6 +49,7 @@ function getBootstrap(token) {
       passwordChangeRequired: false,
       dashboard: dashboard,
       items: catalog.items,
+      owners: catalogOwnerOptions_(data.items),
       itemCatalog: catalog.metadata,
       recentMovements: dashboard.recentMovements,
       settings: publicSettings_()
@@ -88,24 +91,29 @@ function bootstrapItemCatalog_(data) {
 function getDashboard(token, params) {
   return apiResult_(function () {
     requireSession_(token, ['ADMIN', 'STOREKEEPER', 'AUDITOR']);
+    ensureRepositorySchemaCurrent_();
     var days = normalizeDashboardDays_(params && params.days);
     return dashboardFromSnapshot_(inventorySnapshot_(days));
   });
 }
 
-/** listItems(token,{query,status,page,pageSize}) -> paginated stock items. */
+/** listItems(token,{query,status,owner,page,pageSize}) -> paginated stock items. */
 function listItems(token, params) {
   return apiResult_(function () {
     requireSession_(token, ['ADMIN', 'STOREKEEPER', 'AUDITOR']);
+    ensureRepositorySchemaCurrent_();
     params = params || {};
     var paging = clampPage_(params);
     var query = requireText_(params.query, 'البحث', 200, true).toLowerCase();
     var status = normalizeListEnum_(params.status, 'ALL', ITEM_LIST_STATUSES_, 'status', 'حالة الصنف');
+    var owner = requireText_(params.owner, 'المالك', 100, true).toLowerCase();
     var data = inventorySnapshot_(DASHBOARD_CONFIG_.DEFAULT_DAYS);
+    var owners = catalogOwnerOptions_(data.items);
     var items = data.items.map(function (item) {
       return publicItem_(item, data.balances[item.id] || 0, data.itemStats[item.id]);
     }).filter(function (item) {
-      if (query && (item.code + ' ' + item.name + ' ' + item.unit).toLowerCase().indexOf(query) === -1) return false;
+      if (query && (item.code + ' ' + item.name + ' ' + item.owner + ' ' + item.unit).toLowerCase().indexOf(query) === -1) return false;
+      if (owner && String(item.owner || '').toLowerCase() !== owner) return false;
       if (status === 'ACTIVE' && !item.active) return false;
       if (status === 'INACTIVE' && item.active) return false;
       if (status === 'LOW' && item.stockStatus !== 'LOW') return false;
@@ -120,6 +128,7 @@ function listItems(token, params) {
       page: paging.page,
       pageSize: paging.pageSize,
       total: total,
+      owners: owners,
       hasMore: start + paging.pageSize < total
     };
   });
@@ -129,10 +138,14 @@ function listItems(token, params) {
 function saveItem(token, payload) {
   return apiResult_(function () {
     payload = requireObject_(payload, 'الصنف');
+    requireSession_(token, ['ADMIN']);
+    ensureRepositorySchemaCurrent_();
     return withScriptLock_(function () {
       var session = requireSession_(token, ['ADMIN']);
+      preflightInventoryMutation_('ITEMS');
       var code = normalizeItemCode_(payload.code);
       var name = requireText_(payload.name, 'اسم الصنف', 160, false);
+      var requestedOwner = requireText_(payload.owner, 'المالك', 100, true);
       var unit = requireText_(payload.unit, 'الوحدة', 40, false);
       var reorderLevel = requireFiniteNumber_(payload.reorderLevel === undefined ? 0 : payload.reorderLevel, 'حد إعادة الطلب', 0, MAX_QUANTITY_);
       var duplicate = findItemByCode_(code);
@@ -141,28 +154,33 @@ function saveItem(token, payload) {
       if (!payload.id) {
         if (duplicate) throw new WarehouseError_('DUPLICATE_ITEM_CODE', 'رمز الصنف مستخدم مسبقاً.', { field: 'code' });
         var openingQuantity = requireFiniteNumber_(payload.openingQuantity === undefined ? 0 : payload.openingQuantity, 'الرصيد الافتتاحي', 0, MAX_QUANTITY_);
+        var initialActive = parseBoolean_(payload.active, true);
+        validateNewItemLifecycle_(initialActive, openingQuantity);
         var created = appendItemRecord_({
           id: newId_('ITM'),
           code: code,
           name: name,
+          owner: requestedOwner || 'غير محدد',
           unit: unit,
           openingQuantity: roundQuantity_(openingQuantity),
           reorderLevel: roundQuantity_(reorderLevel),
-          active: parseBoolean_(payload.active, true),
+          active: initialActive,
           createdAt: now,
           updatedAt: now,
           createdBy: session.user.username,
           updatedBy: session.user.username
         });
-        appendAuditRecord_({
+        var createAuditWarning = appendCommittedInventoryAudit_({
           actor: session.user,
           action: 'ITEM_CREATE',
           entityType: 'ITEM',
           entityId: created.id,
           status: 'SUCCESS',
-          details: { code: created.code, openingQuantity: created.openingQuantity }
+          details: { code: created.code, owner: created.owner, openingQuantity: created.openingQuantity }
         });
-        return { item: publicItem_(created, created.openingQuantity) };
+        var createResult = { item: publicItem_(created, created.openingQuantity) };
+        if (createAuditWarning) createResult.auditWarning = createAuditWarning;
+        return createResult;
       }
 
       var item = findItemById_(requireText_(payload.id, 'معرف الصنف', 100, false));
@@ -177,24 +195,27 @@ function saveItem(token, payload) {
       var nextActive = payload.active === undefined ? item.active : parseBoolean_(payload.active, item.active);
       var itemMovements = allMovementRecords_();
       validateItemLifecycleChange_(item, unit, nextActive, itemMovements);
+      var currentBalance = calculateBalances_([item], itemMovements)[item.id] || 0;
       var updated = updateItemFields_(item, {
         code: code,
         name: name,
+        owner: requestedOwner || item.owner || 'غير محدد',
         unit: unit,
         reorderLevel: roundQuantity_(reorderLevel),
         active: nextActive,
         updatedBy: session.user.username
       });
-      var updatedSnapshot = inventorySnapshot_(DASHBOARD_CONFIG_.DEFAULT_DAYS);
-      appendAuditRecord_({
+      var updateAuditWarning = appendCommittedInventoryAudit_({
         actor: session.user,
         action: 'ITEM_UPDATE',
         entityType: 'ITEM',
         entityId: updated.id,
         status: 'SUCCESS',
-        details: { code: updated.code, active: updated.active }
+        details: { code: updated.code, owner: updated.owner, active: updated.active }
       });
-      return { item: publicItem_(updated, updatedSnapshot.balances[updated.id] || 0, updatedSnapshot.itemStats[updated.id]) };
+      var updateResult = { item: publicItem_(updated, currentBalance) };
+      if (updateAuditWarning) updateResult.auditWarning = updateAuditWarning;
+      return updateResult;
     });
   });
 }
@@ -206,20 +227,34 @@ function saveItem(token, payload) {
 function listMovements(token, params) {
   return apiResult_(function () {
     requireSession_(token, ['ADMIN', 'STOREKEEPER', 'AUDITOR']);
+    ensureRepositorySchemaCurrent_();
     params = params || {};
     var paging = clampPage_(params);
     var query = requireText_(params.query, 'البحث', 200, true).toLowerCase();
     var type = normalizeListEnum_(params.type, 'ALL', MOVEMENT_LIST_TYPES_, 'type', 'نوع الحركة');
     var itemId = String(params.itemId || '');
+    var itemQuery = requireText_(params.itemQuery, 'بحث الصنف', 200, true).toLowerCase();
     var dateFrom = params.dateFrom ? parseDocumentDate_(params.dateFrom, 'dateFrom') : null;
     var dateTo = params.dateTo ? parseDocumentDate_(params.dateTo, 'dateTo') : null;
     var fromKey = dateFrom ? documentDateKey_(dateFrom) : null;
     var toKey = dateTo ? documentDateKey_(dateTo) : null;
     validateDocumentDateRange_(fromKey, toKey);
+    var items = allItemRecords_();
+    var itemById = Object.create(null);
+    items.forEach(function (item) { itemById[item.id] = item; });
     var all = allMovementRecords_();
     var movements = all.filter(function (movement) {
       if (type !== 'ALL' && movement.type !== type) return false;
       if (itemId && movement.itemId !== itemId) return false;
+      var currentItem = itemById[movement.itemId] || null;
+      var itemHaystack = [
+        movement.itemCode,
+        movement.itemName,
+        currentItem && currentItem.code,
+        currentItem && currentItem.name,
+        currentItem && currentItem.owner
+      ].join(' ').toLowerCase();
+      if (itemQuery && itemHaystack.indexOf(itemQuery) === -1) return false;
       var dateKey = documentDateKey_(movement.documentDate || movement.timestamp);
       if (fromKey && dateKey < fromKey) return false;
       if (toKey && dateKey > toKey) return false;
@@ -227,7 +262,7 @@ function listMovements(token, params) {
       return !query || haystack.indexOf(query) !== -1;
     }).sort(newestMovementFirst_);
     var total = movements.length;
-    var reportSummary = movementReportSummary_(movements, allItemRecords_(), all);
+    var reportSummary = movementReportSummary_(movements, items, all);
     var start = (paging.page - 1) * paging.pageSize;
     return {
       movements: publicMovements_(movements.slice(start, start + paging.pageSize), all),
@@ -248,8 +283,11 @@ function listMovements(token, params) {
 function saveMovement(token, payload) {
   return apiResult_(function () {
     payload = requireObject_(payload, 'حركة المخزون');
+    requireSession_(token, ['ADMIN', 'STOREKEEPER']);
+    ensureRepositorySchemaCurrent_();
     return withScriptLock_(function () {
       var session = requireSession_(token, ['ADMIN', 'STOREKEEPER']);
+      preflightInventoryMutation_('MOVEMENTS');
       var clientRequestId = normalizeClientRequestId_(payload.clientRequestId, true);
       var requestedItemId = requireText_(payload.itemId, 'الصنف', 100, false);
       var type = normalizeMovementType_(payload.type);
@@ -332,7 +370,7 @@ function saveMovement(token, payload) {
         actorUsername: session.user.username,
         actorDisplayName: session.user.displayName
       });
-      appendAuditRecord_({
+      var movementAuditWarning = appendCommittedInventoryAudit_({
         actor: session.user,
         action: 'MOVEMENT_CREATE',
         entityType: 'MOVEMENT',
@@ -340,7 +378,9 @@ function saveMovement(token, payload) {
         status: 'SUCCESS',
         details: { itemId: item.id, type: type, direction: movementDirection_(type, netChange), quantity: quantity, party: party, reference: reference, balanceAfter: after }
       });
-      return { movement: publicMovement_(movement, false), balancePreview: movementBalancePreview_(movement), deduplicated: false };
+      var movementResult = { movement: publicMovement_(movement, false), balancePreview: movementBalancePreview_(movement), deduplicated: false };
+      if (movementAuditWarning) movementResult.auditWarning = movementAuditWarning;
+      return movementResult;
     });
   });
 }
@@ -349,8 +389,11 @@ function saveMovement(token, payload) {
 function reverseMovement(token, payload) {
   return apiResult_(function () {
     payload = requireObject_(payload, 'عكس الحركة');
+    requireSession_(token, ['ADMIN', 'STOREKEEPER']);
+    ensureRepositorySchemaCurrent_();
     return withScriptLock_(function () {
       var session = requireSession_(token, ['ADMIN', 'STOREKEEPER']);
+      preflightInventoryMutation_('MOVEMENTS');
       var movementId = requireText_(payload.movementId || payload.id, 'معرف الحركة', 100, false);
       var reason = requireText_(payload.reason, 'سبب العكس', 500, false);
       var clientRequestId = normalizeClientRequestId_(payload.clientRequestId, false);
@@ -361,6 +404,7 @@ function reverseMovement(token, payload) {
       for (var i = 0; i < allMovements.length; i += 1) if (allMovements[i].id === movementId) original = allMovements[i];
       if (!original) throw new WarehouseError_('MOVEMENT_NOT_FOUND', 'الحركة غير موجودة.');
       if (original.type === 'REVERSAL') throw new WarehouseError_('REVERSAL_NOT_REVERSIBLE', 'لا يمكن عكس حركة عكس.');
+      validateReversalDocumentDate_(reversalDocumentDate, original);
       var requestIdMatch = null;
       var existingReversal = null;
       allMovements.forEach(function (movement) {
@@ -385,6 +429,7 @@ function reverseMovement(token, payload) {
       var item = null;
       for (var j = 0; j < items.length; j += 1) if (items[j].id === original.itemId) item = items[j];
       if (!item) throw new WarehouseError_('ITEM_NOT_FOUND', 'الصنف المرتبط بالحركة غير موجود.');
+      validateReversalItemState_(item);
       var balances = calculateBalances_(items, allMovements);
       var before = roundQuantity_(balances[item.id] || 0);
       var netChange = roundQuantity_(-original.netChange);
@@ -414,7 +459,7 @@ function reverseMovement(token, payload) {
         actorUsername: session.user.username,
         actorDisplayName: session.user.displayName
       });
-      appendAuditRecord_({
+      var reversalAuditWarning = appendCommittedInventoryAudit_({
         actor: session.user,
         action: 'MOVEMENT_REVERSE',
         entityType: 'MOVEMENT',
@@ -422,7 +467,9 @@ function reverseMovement(token, payload) {
         status: 'SUCCESS',
         details: { originalMovementId: original.id, reason: reason, balanceAfter: after }
       });
-      return { movement: publicMovement_(reversal, false), balancePreview: movementBalancePreview_(reversal), originalMovementId: original.id, deduplicated: false };
+      var reversalResult = { movement: publicMovement_(reversal, false), balancePreview: movementBalancePreview_(reversal), originalMovementId: original.id, deduplicated: false };
+      if (reversalAuditWarning) reversalResult.auditWarning = reversalAuditWarning;
+      return reversalResult;
     });
   });
 }
@@ -533,10 +580,7 @@ function inventorySnapshot_(days) {
   finalizeFlowAggregate_(todayFlow);
   Object.keys(flowByUnitMap).forEach(function (unit) { finalizeFlowAggregate_(flowByUnitMap[unit]); });
 
-  var recentRows = [];
-  for (var movementIndex = movements.length - 1; movementIndex >= 0 && recentRows.length < DASHBOARD_CONFIG_.RECENT_LIMIT; movementIndex -= 1) {
-    recentRows.push(movements[movementIndex]);
-  }
+  var recentRows = movements.slice().sort(newestMovementFirst_).slice(0, DASHBOARD_CONFIG_.RECENT_LIMIT);
   return {
     days: days,
     generatedAt: now,
@@ -592,8 +636,11 @@ function movementReportSummary_(filteredMovements, items, allMovements) {
     if (!itemBuckets[itemKey]) {
       itemBuckets[itemKey] = {
         itemId: movement.itemId || null,
-        itemCode: item ? item.code : movement.itemCode,
-        itemName: item ? item.name : movement.itemName,
+        itemCode: movement.itemCode || (item && item.code) || '',
+        itemName: movement.itemName || (item && item.name) || '',
+        currentItemCode: item ? item.code : '',
+        currentItemName: item ? item.name : '',
+        owner: item ? (item.owner || 'غير محدد') : 'غير محدد',
         unit: unit,
         currentBalance: item && Object.prototype.hasOwnProperty.call(currentBalances, item.id) ? roundQuantity_(currentBalances[item.id]) : null,
         incoming: 0,
@@ -664,6 +711,7 @@ function dashboardFromSnapshot_(data) {
   var currentByUnit = Object.create(null);
   var urgentItems = [];
   var stockItems = [];
+  var inactiveStockAnomalies = [];
 
   data.items.forEach(function (item) {
     var stats = data.itemStats[item.id];
@@ -671,6 +719,13 @@ function dashboardFromSnapshot_(data) {
     if (!item.active) {
       inactiveItems += 1;
       counts.INACTIVE += 1;
+      if (roundQuantity_(publicItem.currentQuantity) !== 0) {
+        publicItem.inventoryAnomaly = 'INACTIVE_WITH_STOCK';
+        publicItem.shortageToReorder = 0;
+        publicItem.stockCoverageRatio = null;
+        inactiveStockAnomalies.push(publicItem);
+        urgentItems.push(publicItem);
+      }
       return;
     }
     activeItems += 1;
@@ -711,7 +766,7 @@ function dashboardFromSnapshot_(data) {
   var flowByUnit = flowUnitKeys.map(function (unit) {
     return { unit: unit, flow: data.flowByUnitMap[unit] };
   });
-  var actionNeeded = counts.LOW + counts.OUT;
+  var actionNeeded = counts.LOW + counts.OUT + inactiveStockAnomalies.length;
   var healthyPercentage = activeItems ? roundRatio_(counts.AVAILABLE * 100 / activeItems) : 100;
   var summary = {
     totalItems: activeItems,
@@ -721,6 +776,7 @@ function dashboardFromSnapshot_(data) {
     availableItems: counts.AVAILABLE,
     lowStockItems: counts.LOW,
     outOfStockItems: counts.OUT,
+    inactiveStockAnomalyCount: inactiveStockAnomalies.length,
     actionNeededCount: actionNeeded,
     healthyPercentage: healthyPercentage,
     currentQuantity: roundQuantity_(totalCurrentQuantity),
@@ -765,6 +821,7 @@ function dashboardFromSnapshot_(data) {
     flowByUnit: flowByUnit,
     urgentItems: urgentItems.slice(0, DASHBOARD_CONFIG_.URGENT_LIMIT),
     urgentItemsTotal: urgentItems.length,
+    inactiveStockAnomalies: inactiveStockAnomalies.slice(0, DASHBOARD_CONFIG_.URGENT_LIMIT),
     topStockItems: topStockItems,
     stockLevelSeries: topStockItems.map(function (item) {
       return { itemId: item.id, code: item.code, name: item.name, unit: item.unit, currentQuantity: item.currentQuantity, reorderLevel: item.reorderLevel, status: item.status };
@@ -880,8 +937,8 @@ function finalizeTrendPoint_(point) {
 }
 
 function compareUrgentItems_(a, b) {
-  var aRank = a.stockStatus === 'OUT' ? 0 : 1;
-  var bRank = b.stockStatus === 'OUT' ? 0 : 1;
+  var aRank = a.inventoryAnomaly === 'INACTIVE_WITH_STOCK' ? 0 : (a.stockStatus === 'OUT' ? 1 : 2);
+  var bRank = b.inventoryAnomaly === 'INACTIVE_WITH_STOCK' ? 0 : (b.stockStatus === 'OUT' ? 1 : 2);
   if (aRank !== bRank) return aRank - bRank;
   var aCoverage = a.stockCoverageRatio === null ? Number.POSITIVE_INFINITY : a.stockCoverageRatio;
   var bCoverage = b.stockCoverageRatio === null ? Number.POSITIVE_INFINITY : b.stockCoverageRatio;
@@ -900,6 +957,7 @@ function publicItem_(item, currentQuantity, stats) {
     id: item.id,
     code: item.code,
     name: item.name,
+    owner: item.owner || 'غير محدد',
     unit: item.unit,
     openingQuantity: item.openingQuantity,
     reorderLevel: item.reorderLevel,
@@ -1010,6 +1068,29 @@ function publicSettings_() {
   };
 }
 
+function catalogOwnerOptions_(items) {
+  var seen = Object.create(null);
+  (items || []).forEach(function (item) {
+    var owner = String(item.owner || '').trim();
+    if (owner) seen[owner] = true;
+  });
+  return Object.keys(seen).sort(function (a, b) { return a.localeCompare(b, 'ar'); });
+}
+
+function preflightInventoryMutation_(schemaKey) {
+  schemaMetadata_(schemaKey);
+  preflightAuthAudit_();
+}
+
+/**
+ * Inventory writes are already committed when their audit row is appended.
+ * Reuse the bounded durable audit outbox so a transient audit failure returns
+ * truthful success with a warning and is replayed by a later mutation.
+ */
+function appendCommittedInventoryAudit_(input) {
+  return appendCommittedAuthAudit_(input);
+}
+
 function normalizeListEnum_(value, defaultValue, allowedValues, field, label) {
   var normalized = value === null || value === undefined || String(value).trim() === '' ? defaultValue : String(value).trim().toUpperCase();
   if (allowedValues.indexOf(normalized) === -1) {
@@ -1074,6 +1155,26 @@ function validateItemLifecycleChange_(item, nextUnit, nextActive, movements) {
     if (roundQuantity_(currentBalance) !== 0) {
       throw new WarehouseError_('ITEM_HAS_STOCK', 'لا يمكن تعطيل صنف لديه رصيد حالي. صفّر الرصيد بحركة مخزون أولاً.', { currentBalance: roundQuantity_(currentBalance) });
     }
+  }
+}
+
+function validateNewItemLifecycle_(active, openingQuantity) {
+  if (!active && roundQuantity_(Number(openingQuantity) || 0) !== 0) {
+    throw new WarehouseError_('ITEM_INACTIVE_WITH_STOCK', 'لا يمكن إنشاء صنف موقوف برصيد غير صفري. أنشئه نشطاً أو اجعل الرصيد صفراً.');
+  }
+}
+
+function validateReversalItemState_(item) {
+  if (item && item.active === false) {
+    throw new WarehouseError_('ITEM_INACTIVE', 'فعّل الصنف أولاً قبل إنشاء حركة عكس قد تغيّر رصيده.');
+  }
+}
+
+function validateReversalDocumentDate_(reversalDate, original) {
+  if (!reversalDate || !original) return;
+  var originalDate = original.documentDate || original.timestamp;
+  if (originalDate && documentDateKey_(reversalDate) < documentDateKey_(originalDate)) {
+    throw new WarehouseError_('REVERSAL_DATE_BEFORE_ORIGINAL', 'تاريخ العكس لا يمكن أن يسبق تاريخ الحركة الأصلية.', { field: 'documentDate' });
   }
 }
 

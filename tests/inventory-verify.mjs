@@ -55,6 +55,16 @@ const settledMovements = [
 ];
 expectWarehouseError('ITEM_UNIT_IMMUTABLE', () => context.validateItemLifecycleChange_(zeroOpeningItem, 'box', true, settledMovements));
 context.validateItemLifecycleChange_(zeroOpeningItem, 'piece', false, settledMovements);
+context.validateNewItemLifecycle_(true, 10);
+context.validateNewItemLifecycle_(false, 0);
+expectWarehouseError('ITEM_INACTIVE_WITH_STOCK', () => context.validateNewItemLifecycle_(false, 1));
+expectWarehouseError('ITEM_INACTIVE_WITH_STOCK', () => context.validateNewItemLifecycle_(false, 0.000001));
+expectWarehouseError('ITEM_INACTIVE', () => context.validateReversalItemState_({ id: 'ITM-OFF', active: false }));
+context.validateReversalDocumentDate_(new Date('2026-07-10T12:00:00Z'), { documentDate: new Date('2026-07-10T12:00:00Z') });
+expectWarehouseError('REVERSAL_DATE_BEFORE_ORIGINAL', () => context.validateReversalDocumentDate_(
+  new Date('2026-07-09T12:00:00Z'),
+  { documentDate: new Date('2026-07-10T12:00:00Z') }
+));
 
 // Idempotency succeeds only for the same normalized payload and actor.
 const originalRequest = {
@@ -82,8 +92,8 @@ assert.equal(context.reversalRequestMatches_(storedReversal, { ...reversalReques
 // Report quantities are separated by unit. Current balances use the complete
 // ledger, while flow values use the complete filtered set passed to summary.
 const items = [
-  { id: 'ITM-KG', code: 'KG-1', name: 'Powder', unit: 'kg', openingQuantity: 10 },
-  { id: 'ITM-PC', code: 'PC-1', name: 'Valve', unit: 'piece', openingQuantity: 20 }
+  { id: 'ITM-KG', code: 'KG-1', name: 'Powder', owner: 'مصلحة المياه', unit: 'kg', openingQuantity: 10 },
+  { id: 'ITM-PC', code: 'PC-1', name: 'Valve', owner: 'سلطة المياه', unit: 'piece', openingQuantity: 20 }
 ];
 const movements = [
   { id: 'M1', type: 'IN', itemId: 'ITM-KG', itemCode: 'KG-1', itemName: 'Powder', quantity: 5, netChange: 5 },
@@ -106,6 +116,25 @@ const paginationPosition = inventorySource.indexOf('movements.slice(', summaryCa
 assert.ok(summaryCallPosition !== -1 && paginationPosition > summaryCallPosition, 'Movement summary must be computed before pagination');
 assert.match(inventorySource, /itemCode:\s*original\.itemCode\s*\|\|\s*item\.code/);
 assert.match(inventorySource, /itemName:\s*original\.itemName\s*\|\|\s*item\.name/);
+
+// The movement item filter searches the complete item set by snapshot/current
+// code, name, or owner; it is not limited to bootstrap's first 50 options.
+const originalRequireSession = context.requireSession_;
+const originalEnsureSchema = context.ensureRepositorySchemaCurrent_;
+const originalAllItems = context.allItemRecords_;
+const originalAllMovements = context.allMovementRecords_;
+context.requireSession_ = () => ({ user: { id: 'USR-1', role: 'ADMIN' } });
+context.ensureRepositorySchemaCurrent_ = () => false;
+context.allItemRecords_ = () => items;
+context.allMovementRecords_ = () => movements;
+const ownerFiltered = context.listMovements('token', { itemQuery: 'سلطة المياه', page: 1, pageSize: 25 });
+assert.equal(ownerFiltered.ok, true);
+assert.equal(ownerFiltered.data.total, 1);
+assert.equal(ownerFiltered.data.movements[0].itemId, 'ITM-PC');
+context.requireSession_ = originalRequireSession;
+context.ensureRepositorySchemaCurrent_ = originalEnsureSchema;
+context.allItemRecords_ = originalAllItems;
+context.allMovementRecords_ = originalAllMovements;
 
 // Rows containing only template/default values never become domain records.
 function makeTable(schema, rowObjects) {
@@ -144,5 +173,6 @@ expectWarehouseError('STOCK_LIMIT_EXCEEDED', () => context.assertBalanceWithinLi
 console.log('inventory validation/idempotency: ok');
 console.log('inventory lifecycle guards: ok');
 console.log('movement report unit grouping: ok');
+console.log('movement item search across the complete catalog: ok');
 console.log('template-row filtering: ok');
 console.log('quantity safety bound: ok');

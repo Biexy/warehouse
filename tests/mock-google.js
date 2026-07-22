@@ -13,9 +13,9 @@
   }
 
   var items = [
-    { id: 'ITM-1', code: 'PUMP-017', name: 'مضخة مياه صناعية', unit: 'قطعة', openingQuantity: 18, currentQuantity: 12, reorderLevel: 5, active: true, stockStatus: 'OK' },
-    { id: 'ITM-2', code: 'VALVE-204', name: 'صمام تحكم نحاسي', unit: 'قطعة', openingQuantity: 9, currentQuantity: 3, reorderLevel: 4, active: true, stockStatus: 'LOW' },
-    { id: 'ITM-3', code: 'FILTER-08', name: 'مرشح هواء دقيق', unit: 'علبة', openingQuantity: 6, currentQuantity: 0, reorderLevel: 2, active: true, stockStatus: 'OUT' }
+    { id: 'ITM-1', code: 'PUMP-017', name: 'مضخة مياه صناعية', owner: 'سلطة المياه', unit: 'قطعة', openingQuantity: 18, currentQuantity: 12, reorderLevel: 5, active: true, stockStatus: 'OK' },
+    { id: 'ITM-2', code: 'VALVE-204', name: 'صمام تحكم نحاسي', owner: 'مصلحة المياه', unit: 'قطعة', openingQuantity: 9, currentQuantity: 3, reorderLevel: 4, active: true, stockStatus: 'LOW' },
+    { id: 'ITM-3', code: 'FILTER-08', name: 'مرشح هواء دقيق', owner: 'سلطة المياه', unit: 'علبة', openingQuantity: 6, currentQuantity: 0, reorderLevel: 2, active: true, stockStatus: 'OUT' }
   ];
   for (var itemIndex = 4; itemIndex <= 84; itemIndex += 1) {
     var mockStatus = itemIndex % 17 === 0 ? 'OUT' : (itemIndex % 7 === 0 ? 'LOW' : 'OK');
@@ -25,6 +25,7 @@
       id: 'ITM-' + itemIndex,
       code: 'PART-' + String(itemIndex).padStart(3, '0'),
       name: 'قطعة تشغيل تجريبية ' + itemIndex,
+      owner: itemIndex % 2 === 0 ? 'سلطة المياه' : 'مصلحة المياه',
       unit: itemIndex % 3 === 0 ? 'علبة' : 'قطعة',
       openingQuantity: mockQuantity,
       currentQuantity: mockQuantity,
@@ -163,7 +164,8 @@
     var query = String(params.query || '').trim().toLocaleLowerCase('ar');
     var status = String(params.status || '').toUpperCase();
     return items.filter(function (item) {
-      if (query && [item.code, item.name, item.unit].join(' ').toLocaleLowerCase('ar').indexOf(query) === -1) return false;
+      if (query && [item.code, item.name, item.owner, item.unit].join(' ').toLocaleLowerCase('ar').indexOf(query) === -1) return false;
+      if (params.owner && item.owner !== params.owner) return false;
       if (status === 'ACTIVE' && item.active === false) return false;
       if (status === 'INACTIVE' && item.active !== false) return false;
       if ((status === 'AVAILABLE' || status === 'OK') && item.stockStatus !== 'OK') return false;
@@ -176,10 +178,14 @@
   function filterMovements(params) {
     params = params || {};
     var query = String(params.query || '').trim().toLocaleLowerCase('ar');
+    var itemQuery = String(params.itemQuery || '').trim().toLocaleLowerCase('ar');
     var type = String(params.type || '').toUpperCase();
     return movements.filter(function (movement) {
       if (type && movement.type !== type) return false;
       if (params.itemId && movement.itemId !== params.itemId) return false;
+      var currentItem = items.find(function (item) { return item.id === movement.itemId; });
+      var itemHaystack = [movement.itemCode, movement.itemName, currentItem && currentItem.code, currentItem && currentItem.name, currentItem && currentItem.owner].join(' ').toLocaleLowerCase('ar');
+      if (itemQuery && itemHaystack.indexOf(itemQuery) === -1) return false;
       if (params.dateFrom && movement.documentDate < params.dateFrom) return false;
       if (params.dateTo && movement.documentDate > params.dateTo) return false;
       var haystack = [movement.id, movement.itemCode, movement.itemName, movement.party, movement.reference, movement.notes].join(' ').toLocaleLowerCase('ar');
@@ -200,6 +206,7 @@
           itemId: movement.itemId,
           itemCode: movement.itemCode,
           itemName: movement.itemName,
+          owner: item && item.owner || 'غير محدد',
           unit: unit,
           incoming: 0,
           outgoing: 0,
@@ -230,9 +237,10 @@
       passwordChangeRequired: false,
       dashboard: dashboard(30),
       items: items.slice(0, 50),
+      owners: ['سلطة المياه', 'مصلحة المياه'],
       itemCatalog: { total: items.length, activeTotal: items.length, returned: 50, truncated: true, limit: 50, mode: 'ACTIVE_CAPPED', sort: 'CODE_NAME_ID' },
       recentMovements: movements,
-      settings: { systemName: 'نظام مراقبة المخزون', backupConfigured: false, schemaVersion: '1' }
+      settings: { systemName: 'نظام مراقبة المخزون', backupConfigured: false, schemaVersion: '2' }
     };
   }
 
@@ -241,7 +249,11 @@
     if (method === 'authenticate') return { token: 'wms_preview_token_1234567890123456789012345678901234567890', expiresAt: '2026-07-21T15:30:00.000Z', user: users[0] };
     if (method === 'getBootstrap') return bootstrap();
     if (method === 'getDashboard') return dashboard(payload.days);
-    if (method === 'listItems') return paginate(filterItems(payload), payload, 'items');
+    if (method === 'listItems') {
+      var itemResult = paginate(filterItems(payload), payload, 'items');
+      itemResult.owners = ['سلطة المياه', 'مصلحة المياه'];
+      return itemResult;
+    }
     if (method === 'listMovements') {
       var filteredMovements = filterMovements(payload);
       var movementResult = paginate(filteredMovements, payload, 'movements');
@@ -253,6 +265,21 @@
     if (method === 'saveMovement') return { movement: movements[0] };
     if (method === 'reverseMovement') return { movement: movements[0] };
     if (method === 'saveItem') return { item: items[0] };
+    if (method === 'importProvidedCatalog') {
+      var created = 0;
+      var skippedCodes = [];
+      for (var catalogIndex = 1; catalogIndex <= 76; catalogIndex += 1) {
+        var code = 'ITEM' + String(catalogIndex).padStart(3, '0');
+        if (items.some(function (item) { return item.code === code; })) {
+          skippedCodes.push(code);
+          continue;
+        }
+        var owner = catalogIndex % 2 === 0 ? 'سلطة المياه' : 'مصلحة المياه';
+        items.push({ id: 'ITM-CATALOG-' + catalogIndex, code: code, name: 'صنف القائمة الجاهزة ' + code, owner: owner, unit: 'قطعة', openingQuantity: catalogIndex % 12 + 1, currentQuantity: catalogIndex % 12 + 1, reorderLevel: 0, active: true, stockStatus: 'OK' });
+        created += 1;
+      }
+      return { catalogTotal: 76, created: created, skipped: skippedCodes.length, skippedCodes: skippedCodes, conflictingCodes: [], owners: ['سلطة المياه', 'مصلحة المياه'], unit: 'قطعة', reorderLevel: 0 };
+    }
     if (method === 'saveUser') return { user: users[1], temporaryPassword: 'Z!7aPreviewPassword1' };
     if (method === 'resetUserPassword') return { user: users[1], temporaryPassword: 'Z!7aPreviewPassword2' };
     if (method === 'changeMyPassword') return { changed: true, requiresLogin: true };

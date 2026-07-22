@@ -367,6 +367,11 @@ const tests = [
   ['fresh setup starts with login and forces a password change', () => {
     const harness = createHarness();
     const setup = initialize(harness);
+    assert.equal(harness.context.INITIAL_ADMIN_PASSWORD_, 'Warehouse@2026!');
+    assert.doesNotThrow(() => harness.context.validateStrongPassword_('123456', 'admin'));
+    assertWarehouseError(() => harness.context.validateStrongPassword_('12345', 'admin'), 'WEAK_PASSWORD');
+    assert.doesNotThrow(() => harness.context.validateStrongPassword_('x'.repeat(256), 'admin'));
+    assertWarehouseError(() => harness.context.validateStrongPassword_('x'.repeat(257), 'admin'), 'WEAK_PASSWORD');
     assert.ok(harness.properties.getProperty(harness.context.AUTH_CONFIG_.PEPPER_PROPERTY));
     assert.equal(harness.context.countUserRows_(), 1, harness.spreadsheet.serializedCells());
     assert.equal(harness.spreadsheet.serializedCells().includes(setup.temporaryPassword), false, 'plaintext password leaked to a sheet');
@@ -523,6 +528,54 @@ const tests = [
     const recoveredLogin = assertOk(harness.context.login('outbox-user', reset.temporaryPassword));
     assert.equal(recoveredLogin.user.forcePasswordChange, true);
     assert.equal(harness.properties.getProperty(harness.context.AUTH_AUDIT_OUTBOX_PROPERTY_), null);
+  }],
+
+  ['audit outbox never discards an older event when capacity is reached', () => {
+    const harness = createHarness();
+    initialize(harness);
+    const events = Array.from({ length: harness.context.AUTH_AUDIT_OUTBOX_MAX_EVENTS_ }, (_unused, index) =>
+      harness.context.pendingAuthAuditEvent_({
+        actor: { id: 'USR-1', username: 'admin', displayName: 'Admin' },
+        action: `TEST_${index}`,
+        entityType: 'TEST',
+        entityId: String(index),
+        status: 'SUCCESS',
+        details: { index }
+      }, new Error('forced outage'))
+    );
+    harness.context.writePendingAuthAudits_(events);
+    const firstIncident = events[0].incidentId;
+    const overflow = harness.context.pendingAuthAuditEvent_({ action: 'OVERFLOW' }, new Error('forced outage'));
+    assert.throws(() => harness.context.writePendingAuthAudits_([...events, overflow]), /capacity reached/);
+    const stored = JSON.parse(harness.properties.getProperty(harness.context.AUTH_AUDIT_OUTBOX_PROPERTY_));
+    assert.equal(stored.length, harness.context.AUTH_AUDIT_OUTBOX_MAX_EVENTS_);
+    assert.equal(stored[0].incidentId, firstIncident);
+    const originalAppendAudit = harness.context.appendAuditRecord_;
+    harness.context.appendAuditRecord_ = () => { throw new Error('still unavailable'); };
+    assertWarehouseError(() => harness.context.preflightSessionAudit_(), 'AUDIT_BACKLOG_FULL');
+    harness.context.appendAuditRecord_ = originalAppendAudit;
+  }],
+
+  ['schema v1 upgrades add the owner header without shifting existing item data', () => {
+    const harness = createHarness();
+    initialize(harness);
+    const schema = harness.context.REPOSITORY_SCHEMA_.ITEMS;
+    const sheet = harness.spreadsheet.getSheetByName(schema.name);
+    const headers = harness.context.getHeaderInfo_(sheet);
+    const codeColumn = headers.byLabel[schema.columns.code];
+    const nameColumn = headers.byLabel[schema.columns.name];
+    const ownerColumn = headers.byLabel[schema.columns.owner];
+    sheet.setValueAt(2, codeColumn, 'LEGACY-001');
+    sheet.setValueAt(2, nameColumn, 'Legacy item');
+    sheet.setValueAt(1, ownerColumn, '');
+    harness.context.setSettingValue_('SCHEMA_VERSION', '1', 'NUMBER', 'legacy schema', 'SYSTEM');
+
+    assert.equal(harness.context.ensureRepositorySchemaCurrent_(), true);
+    const migratedHeaders = harness.context.getHeaderInfo_(sheet);
+    assert.ok(migratedHeaders.byLabel[schema.columns.owner] > 0);
+    assert.equal(sheet.valueAt(2, codeColumn), 'LEGACY-001');
+    assert.equal(sheet.valueAt(2, nameColumn), 'Legacy item');
+    assert.equal(String(harness.context.getSettingValue_('SCHEMA_VERSION')), '2');
   }],
 
   ['template rows are ignored, malformed identity rows fail closed, and duplicate creation is rejected', () => {

@@ -4,7 +4,7 @@ var AUTH_CONFIG_ = Object.freeze({
   // Deliberately bounded for Apps Script execution limits. Each round is a
   // server-peppered HMAC-SHA256; salts remain unique per user.
   PASSWORD_KDF_ITERATIONS: 2400,
-  PASSWORD_MIN_LENGTH: 12,
+  PASSWORD_MIN_LENGTH: 6,
   PASSWORD_MAX_LENGTH: 256,
   SESSION_TTL_SECONDS: 21600,
   LOCK_AFTER_FAILURES: 5,
@@ -64,6 +64,7 @@ function logout(token) {
   return apiResult_(function () {
     return withScriptLock_(function () {
       var session = requireSession_(token, null, { allowPasswordChange: true });
+      preflightSessionAudit_();
       CacheService.getScriptCache().remove(session.cacheKey);
       var auditWarning = appendCommittedAuthAudit_({
         actor: session.user,
@@ -274,6 +275,11 @@ function authenticateInternal_(prepared) {
   var user = findUserByNormalizedUsername_(normalized);
   var now = new Date();
 
+  // A pending audit must be durably replayed before another authentication
+  // state change is allowed. This prevents an audit outage from silently
+  // overflowing the bounded Script Properties outbox.
+  preflightSessionAudit_();
+
   if (user && user.lockedUntil && new Date(user.lockedUntil).getTime() > now.getTime()) {
     throw new WarehouseError_('ACCOUNT_LOCKED', 'الحساب مقفل مؤقتاً بعد محاولات فاشلة.', { lockedUntil: isoDate_(user.lockedUntil) });
   }
@@ -393,13 +399,11 @@ function validateRole_(role) {
 
 function validateStrongPassword_(passwordInput, username) {
   var password = passwordInput === null || passwordInput === undefined ? '' : String(passwordInput);
-  var strong = password.length >= AUTH_CONFIG_.PASSWORD_MIN_LENGTH &&
-    password.length <= AUTH_CONFIG_.PASSWORD_MAX_LENGTH &&
-    /[a-z]/.test(password) && /[A-Z]/.test(password) && /[0-9]/.test(password) && /[^A-Za-z0-9]/.test(password);
-  if (!strong || (username && password.toLowerCase().indexOf(String(username).toLowerCase()) !== -1)) {
+  var validLength = password.length >= AUTH_CONFIG_.PASSWORD_MIN_LENGTH && password.length <= AUTH_CONFIG_.PASSWORD_MAX_LENGTH;
+  if (!validLength) {
     throw new WarehouseError_(
       'WEAK_PASSWORD',
-      'كلمة المرور يجب أن تتكون من 12 محرفاً على الأقل، وتضم حرفاً كبيراً وصغيراً ورقماً ورمزاً.',
+      'كلمة المرور يجب أن تتكون من 6 محارف على الأقل.',
       { field: 'newPassword' }
     );
   }
@@ -496,9 +500,43 @@ function constantTimeEqual_(left, right) {
   return mismatch === 0;
 }
 
-/** Fail before a credential mutation if the audit sheet is structurally unusable. */
+/** Fail before a mutation if audit storage is unusable or a replay is blocked. */
 function preflightAuthAudit_() {
   schemaMetadata_('AUDIT');
+  var pending = readPendingAuthAudits_();
+  if (!pending.length) return;
+  try {
+    flushPendingAuthAudits_();
+  } catch (error) {
+    throw new WarehouseError_(
+      'AUDIT_BACKLOG_UNAVAILABLE',
+      'تعذر ترحيل سجل تدقيق مؤجل. لم تُنفذ العملية لحماية اكتمال سجل الرقابة؛ حاول مرة أخرى لاحقاً.',
+      { pendingEvents: readPendingAuthAudits_().length }
+    );
+  }
+}
+
+/**
+ * Login/logout remain available during a short audit outage. Pending session
+ * events may accumulate only up to the durable bound; once full, the next
+ * session mutation is rejected before state changes and no old event is lost.
+ */
+function preflightSessionAudit_() {
+  var pending = readPendingAuthAudits_();
+  if (!pending.length) return;
+  try {
+    schemaMetadata_('AUDIT');
+    flushPendingAuthAudits_();
+  } catch (error) {
+    pending = readPendingAuthAudits_();
+    if (pending.length >= AUTH_AUDIT_OUTBOX_MAX_EVENTS_) {
+      throw new WarehouseError_(
+        'AUDIT_BACKLOG_FULL',
+        'تعذر ترحيل سجل التدقيق المؤجل، لذلك أُوقف طلب الجلسة قبل التنفيذ. حاول مرة أخرى لاحقاً.',
+        { pendingEvents: pending.length }
+      );
+    }
+  }
 }
 
 /**
@@ -596,16 +634,34 @@ function readPendingAuthAudits_() {
 
 function writePendingAuthAudits_(pending) {
   var properties = PropertiesService.getScriptProperties();
-  pending = pending.slice(-AUTH_AUDIT_OUTBOX_MAX_EVENTS_);
+  pending = Array.isArray(pending) ? pending.slice() : [];
+  if (pending.length > AUTH_AUDIT_OUTBOX_MAX_EVENTS_) {
+    throw new Error('Audit outbox capacity reached; no event was discarded.');
+  }
   var serialized = JSON.stringify(pending);
-  while (pending.length > 1 && serialized.length > AUTH_AUDIT_OUTBOX_MAX_CHARS_) {
-    pending.shift();
+  if (serialized.length > AUTH_AUDIT_OUTBOX_MAX_CHARS_) {
+    // Retain every event identity/action while compacting optional diagnostics.
+    pending = pending.map(function (event) {
+      event = event || {};
+      var record = event.record || {};
+      return {
+        incidentId: event.incidentId || '',
+        occurredAt: event.occurredAt || '',
+        failureMessage: String(event.failureMessage || '').substring(0, 120),
+        record: {
+          actor: record.actor || {},
+          action: record.action || 'UNKNOWN',
+          entityType: record.entityType || '',
+          entityId: record.entityId || '',
+          status: record.status || 'SUCCESS',
+          details: { compacted: true }
+        }
+      };
+    });
     serialized = JSON.stringify(pending);
   }
   if (serialized.length > AUTH_AUDIT_OUTBOX_MAX_CHARS_) {
-    pending[0].record.details = { omitted: true };
-    pending[0].failureMessage = pending[0].failureMessage.substring(0, 200);
-    serialized = JSON.stringify(pending);
+    throw new Error('Audit outbox exceeds durable property capacity; no event was discarded.');
   }
   if (!pending.length) properties.deleteProperty(AUTH_AUDIT_OUTBOX_PROPERTY_);
   else properties.setProperty(AUTH_AUDIT_OUTBOX_PROPERTY_, serialized);

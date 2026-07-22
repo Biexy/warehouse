@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 
-const backendFiles = ['Code.gs', 'Auth.gs', 'Repository.gs', 'Inventory.gs', 'Export.gs'];
+const backendFiles = ['Code.gs', 'Auth.gs', 'Repository.gs', 'Inventory.gs', 'CatalogImport.gs', 'Export.gs'];
 const backend = backendFiles.map((file) => fs.readFileSync(file, 'utf8')).join('\n');
 const index = fs.readFileSync('Index.html', 'utf8');
 const app = fs.readFileSync('App.html', 'utf8');
@@ -13,6 +13,12 @@ JSON.parse(fs.readFileSync('appsscript.json', 'utf8'));
 const scriptMatch = app.match(/<script>([\s\S]*?)<\/script>/);
 if (!scriptMatch) throw new Error('App.html script block is missing.');
 new Function(scriptMatch[1]);
+
+const csvCellMatch = scriptMatch[1].match(/function csvCell\(value\)\s*\{([\s\S]*?)\n\s*\}/);
+if (!csvCellMatch) throw new Error('csvCell() was not found.');
+const csvCell = new Function(`return function csvCell(value) {${csvCellMatch[1]}\n}`)();
+if (csvCell(-5) !== '"-5"') throw new Error('Negative report numbers must remain numeric in CSV.');
+if (csvCell('=SUM(A1:A2)') !== '"\'=SUM(A1:A2)"') throw new Error('CSV formula-injection protection is missing for text.');
 
 const ids = [...index.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
 const duplicateIds = [...new Set(ids.filter((id, position) => ids.indexOf(id) !== position))];

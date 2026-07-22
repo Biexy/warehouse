@@ -8,15 +8,14 @@
 var WAREHOUSE_CONFIG_ = Object.freeze({
   APP_NAME: 'نظام مراقبة المخزون',
   TIME_ZONE: 'Asia/Hebron',
-  SCHEMA_VERSION: '1',
+  SCHEMA_VERSION: '2',
   MAX_TEXT_LENGTH: 1000,
   MAX_PAGE_SIZE: 100,
   LOCK_WAIT_MS: 30000
 });
 
-// First-install administrator password. It is deliberately easy to type and
-// is accepted only while the pristine SYSTEM-created admin is still waiting
-// for its mandatory first password change.
+// First-install administrator password. It is accepted only while the
+// SYSTEM-created admin is waiting for the mandatory first password change.
 var INITIAL_ADMIN_PASSWORD_ = 'Warehouse@2026!';
 
 /** @constructor */
@@ -68,16 +67,16 @@ function initializeWarehouseFromSheet() {
   if (!spreadsheet) {
     throw new WarehouseError_('SHEET_CONTEXT_REQUIRED', 'شغل التهيئة من قائمة «نظام المخزون» داخل Google Sheets.');
   }
-  requireSpreadsheetOwner_(spreadsheet);
+  var operator = requireSpreadsheetOwner_(spreadsheet);
   var properties = PropertiesService.getScriptProperties();
   var storedId = properties.getProperty('WAREHOUSE_SPREADSHEET_ID');
   if (storedId && storedId !== spreadsheet.getId()) {
     throw new WarehouseError_('SPREADSHEET_MISMATCH', 'المشروع مهيأ لجدول آخر، ولن يتم تغييره تلقائياً.');
   }
   properties.setProperty('WAREHOUSE_SPREADSHEET_ID', spreadsheet.getId());
-  var result = setupSystem_(spreadsheet);
+  var result = setupSystem_(spreadsheet, operator);
   var message = result.created ?
-    ('تمت التهيئة.\n\nاسم المستخدم: ' + result.username + '\nكلمة المرور المؤقتة: ' + result.temporaryPassword + '\n\nانسخها الآن؛ لن تظهر مرة أخرى.') :
+    ('تمت التهيئة.\n\nاسم المستخدم: ' + result.username + '\nكلمة مرور أول دخول: ' + result.temporaryPassword + '\n\nسيطلب النظام تغييرها مباشرة بعد أول دخول.') :
     result.message;
   SpreadsheetApp.getUi().alert('نظام المخزون', message, SpreadsheetApp.getUi().ButtonSet.OK);
   return result;
@@ -90,7 +89,7 @@ function initializeWarehouseFromSheet() {
  * fixed first-install administrator password. Its hash is stored in Sheets;
  * the user must replace it immediately through the mandatory password gate.
  */
-function setupSystem_(spreadsheet) {
+function setupSystem_(spreadsheet, operator) {
   return withScriptLock_(function () {
     setupRepository_(spreadsheet);
     var existingUserCount = countUserRows_();
@@ -141,7 +140,7 @@ function setupSystem_(spreadsheet) {
     });
 
     appendAuditRecord_({
-      actor: { id: admin.id, username: admin.username, displayName: admin.displayName },
+      actor: operator || { id: 'SYSTEM', username: 'SYSTEM', displayName: 'SYSTEM' },
       action: 'SYSTEM_SETUP',
       entityType: 'SYSTEM',
       entityId: spreadsheet.getId(),
@@ -157,7 +156,7 @@ function setupSystem_(spreadsheet) {
       displayName: admin.displayName,
       temporaryPassword: temporaryPassword,
       forcePasswordChange: true,
-      warning: 'انسخ كلمة المرور المؤقتة الآن؛ لن تظهر مرة أخرى.'
+      warning: 'استخدم كلمة مرور أول الدخول ثم غيّرها من البوابة الإلزامية.'
     };
     return result;
   });
