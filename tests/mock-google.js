@@ -38,6 +38,20 @@
     { id: 'MOV-1042', timestamp: '2026-07-21T09:42:00.000Z', documentDate: '2026-07-21', type: 'OUT', itemId: 'ITM-2', itemCode: 'VALVE-204', itemName: 'صمام تحكم نحاسي', quantity: 2, balanceBefore: 5, balanceAfter: 3, party: 'قسم الصيانة', reference: 'ISS-884', notes: '', canReverse: true, reversed: false, actor: { username: 'admin', displayName: 'مدير النظام' } },
     { id: 'MOV-1041', timestamp: '2026-07-20T12:10:00.000Z', documentDate: '2026-07-20', type: 'IN', itemId: 'ITM-1', itemCode: 'PUMP-017', itemName: 'مضخة مياه صناعية', quantity: 4, balanceBefore: 8, balanceAfter: 12, party: 'المورد المحلي', reference: 'REC-332', notes: '', canReverse: true, reversed: false, actor: { username: 'admin', displayName: 'مدير النظام' } }
   ];
+  var catalogRegressionMode = new URLSearchParams(window.location.search).get('catalogRegression') === '1';
+  if (catalogRegressionMode) {
+    var savedRegressionState = window.sessionStorage.getItem('warehouse-catalog-regression-state-v1');
+    if (savedRegressionState) {
+      var parsedRegressionState = JSON.parse(savedRegressionState);
+      items.splice.apply(items, [0, items.length].concat(parsedRegressionState.items || []));
+      movements.splice.apply(movements, [0, movements.length].concat(parsedRegressionState.movements || []));
+    } else {
+      items.splice(0, items.length); movements.splice(0, movements.length);
+    }
+  }
+  function persistRegressionState() {
+    if (catalogRegressionMode) window.sessionStorage.setItem('warehouse-catalog-regression-state-v1', JSON.stringify({items:items,movements:movements}));
+  }
   items.forEach(function (item) {
     item.totalIncoming = movements.filter(function (movement) { return movement.itemId === item.id && movement.type === 'IN'; }).reduce(function (sum, movement) { return sum + movement.quantity; }, 0);
     item.totalOutgoing = movements.filter(function (movement) { return movement.itemId === item.id && movement.type === 'OUT'; }).reduce(function (sum, movement) { return sum + movement.quantity; }, 0);
@@ -201,7 +215,7 @@
     var owner = String(params.owner || '').trim();
     var type = String(params.type || '').toUpperCase();
     return movements.filter(function (movement) {
-      if (type && movement.type !== type) return false;
+      if (type && type !== 'ALL' && movement.type !== type) return false;
       if (params.itemId && movement.itemId !== params.itemId) return false;
       var currentItem = items.find(function (item) { return item.id === movement.itemId; });
       if (owner && (!currentItem || currentItem.owner !== owner)) return false;
@@ -268,14 +282,26 @@
       owners: ['سلطة المياه', 'مصلحة المياه'],
       itemCatalog: { total: items.length, activeTotal: items.length, returned: 50, truncated: true, limit: 50, mode: 'ACTIVE_CAPPED', sort: 'CODE_NAME_ID' },
       recentMovements: movements,
-      settings: { systemName: 'نظام مراقبة المخزون', backupConfigured: false, schemaVersion: '2' }
+      settings: { systemName: 'نظام مراقبة المخزون', backupConfigured: false, schemaVersion: '2', catalogImportCompleted: providedCatalogComplete() }
     };
+  }
+
+  function providedCatalogComplete() {
+    for (var catalogIndex = 1; catalogIndex <= 76; catalogIndex += 1) {
+      var code = 'ITEM' + String(catalogIndex).padStart(3, '0');
+      if (!items.some(function (item) { return item.code === code; })) return false;
+    }
+    return true;
   }
 
   function handle(method, args) {
     var payload = args.length > 1 ? args[1] || {} : args[0] || {};
     if (method === 'authenticate') return { token: 'wms_preview_token_1234567890123456789012345678901234567890', expiresAt: '2026-07-21T15:30:00.000Z', user: previewUser() };
-    if (method === 'getBootstrap') return bootstrap();
+    if (method === 'getBootstrap') {
+      var sessionMode = new URLSearchParams(window.location.search).get('session');
+      if (sessionMode === 'expired' || sessionMode === 'revoked') throw Object.assign(new Error('انتهت الجلسة. سجّل الدخول مجدداً.'), { code: sessionMode === 'expired' ? 'SESSION_EXPIRED' : 'INVALID_SESSION' });
+      return bootstrap();
+    }
     if (method === 'getDashboard') return dashboard(payload.days);
     if (method === 'getInventoryReport') {
       var reportItems = filterItems(payload);
@@ -306,7 +332,22 @@
     }
     if (method === 'listUsers') return paginate(users, payload, 'users');
     if (method === 'logout') return { loggedOut: true };
-    if (method === 'saveMovement') return { movement: movements[0] };
+    if (method === 'saveMovement') {
+      var duplicateMovement = movements.find(function (movement) { return movement.clientRequestId === payload.clientRequestId; });
+      if (duplicateMovement) return { movement: duplicateMovement, deduplicated: true };
+      var movementItem = items.find(function (item) { return item.id === payload.itemId; });
+      if (!movementItem) throw Object.assign(new Error('الصنف غير موجود.'), { code: 'ITEM_NOT_FOUND' });
+      var quantity = Number(payload.quantity);
+      var nextBalance = movementItem.currentQuantity + (payload.type === 'IN' ? quantity : -quantity);
+      if (nextBalance < 0) throw Object.assign(new Error('الرصيد غير كافٍ لتنفيذ حركة الصرف.'), { code: 'INSUFFICIENT_STOCK' });
+      var createdMovement = { id: 'MOV-MOCK-' + (movements.length + 1), clientRequestId: payload.clientRequestId, timestamp: new Date().toISOString(), documentDate: payload.documentDate, type: payload.type, itemId: movementItem.id, itemCode: movementItem.code, itemName: movementItem.name, quantity: quantity, netChange: payload.type === 'IN' ? quantity : -quantity, balanceBefore: movementItem.currentQuantity, balanceAfter: nextBalance, party: payload.party, reference: payload.reference, notes: payload.notes || '', canReverse: true, reversed: false, actor: { username: previewUser().username, displayName: previewUser().displayName }, actorDisplayName: previewUser().displayName };
+      movementItem.currentQuantity = nextBalance;
+      if (payload.type === 'IN') movementItem.totalIncoming = Number(movementItem.totalIncoming || 0) + quantity;
+      else movementItem.totalOutgoing = Number(movementItem.totalOutgoing || 0) + quantity;
+      movements.unshift(createdMovement);
+      persistRegressionState();
+      return { movement: createdMovement, deduplicated: false };
+    }
     if (method === 'correctMovement') return { reversal: movements[0], movement: movements[1], originalMovementId: payload.movementId, deduplicated: false };
     if (method === 'reverseMovement') return { movement: movements[0] };
     if (method === 'saveItem') return { item: items[0] };
@@ -323,7 +364,8 @@
         items.push({ id: 'ITM-CATALOG-' + catalogIndex, code: code, name: 'صنف القائمة الجاهزة ' + code, owner: owner, unit: 'قطعة', openingQuantity: catalogIndex % 12 + 1, currentQuantity: catalogIndex % 12 + 1, reorderLevel: 0, active: true, stockStatus: 'OK' });
         created += 1;
       }
-      return { catalogTotal: 76, created: created, skipped: skippedCodes.length, skippedCodes: skippedCodes, conflictingCodes: [], owners: ['سلطة المياه', 'مصلحة المياه'], unit: 'قطعة', reorderLevel: 0 };
+      persistRegressionState();
+      return { catalogTotal: 76, created: created, skipped: skippedCodes.length, skippedCodes: skippedCodes, conflictingCodes: [], owners: ['سلطة المياه', 'مصلحة المياه'], unit: 'قطعة', reorderLevel: 0, completed: providedCatalogComplete() };
     }
     if (method === 'saveUser') return { user: users[1], temporaryPassword: 'Z!7aPreviewPassword1' };
     if (method === 'resetUserPassword') return { user: users[1], temporaryPassword: 'Z!7aPreviewPassword2' };
@@ -354,4 +396,5 @@
 
   window.google = { script: {} };
   Object.defineProperty(window.google.script, 'run', { get: createRunner });
+  window.__warehouseMock = { handle: handle, items: items, movements: movements };
 })();

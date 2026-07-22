@@ -1,6 +1,19 @@
 [
   {
     "date": "2026-07-22",
+    "scope": "visual-polish",
+    "macrostructure": "Workbench — form-rail variant with split login",
+    "variation_knobs": "professional Arabic labels / clearer toolbars / restrained operational hierarchy / responsive split login",
+    "theme": "locked design.md",
+    "theme_axes": "dark / Arabic geometric-sans / cool cyan",
+    "vibe": "professional, precise, calm, operational",
+    "enrichment": "none",
+    "nav": "N13",
+    "footer": "Ft2",
+    "brief": "Polish the existing warehouse UI and login without changing workflow"
+  },
+  {
+    "date": "2026-07-22",
     "scope": "app",
     "macrostructure": "Workbench — form-rail variant",
     "variation_knobs": "single continuous page / persistent operation rail / anchored data sections / modal utilities / no sidebar",
