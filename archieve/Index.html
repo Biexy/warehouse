@@ -105,14 +105,14 @@
       </section>
     </main>
 
-    <div id="appShell" class="app-shell app-shell--single" hidden>
-      <header class="topbar topbar--workbench">
-        <button class="workbench-brand" type="button" data-nav-view="dashboard" aria-label="الانتقال إلى بداية مساحة العمل">
+    <div id="appShell" class="app-shell" hidden>
+      <header class="topbar">
+        <button class="mobile-brand" type="button" data-nav-view="dashboard" aria-label="الانتقال إلى لوحة المتابعة">
           <span class="brand-mark brand-mark--small" aria-hidden="true"><svg class="icon"><use href="#icon-box"></use></svg></span>
-          <span><strong>منظومة المخازن التفاعلية</strong><small>إدارة الأصناف والحركات والتقارير في شاشة واحدة</small></span>
+          <span>المخزون</span>
         </button>
 
-        <div id="globalSearch" class="global-search global-search--workbench">
+        <div id="globalSearch" class="global-search">
           <svg class="icon global-search__icon" aria-hidden="true"><use href="#icon-search"></use></svg>
           <label class="sr-only" for="globalSearchInput">بحث شامل</label>
           <input id="globalSearchInput" type="search" autocomplete="off" placeholder="ابحث عن صنف أو حركة…" aria-controls="globalSearchResults" aria-expanded="false" aria-autocomplete="list">
@@ -120,104 +120,36 @@
           <div id="globalSearchResults" class="search-results" role="listbox" hidden></div>
         </div>
 
-        <div class="topbar-tools">
-          <div id="syncIndicator" class="sync-indicator" role="status" aria-live="polite">
-            <span class="status-shape status-shape--ok" aria-hidden="true"></span>
-            <span id="syncStatusText">متصل بالنظام</span>
+        <div class="topbar-user">
+          <div class="user-copy">
+            <strong id="currentUserName"></strong>
+            <span id="currentUserRole" class="muted"></span>
           </div>
-          <button class="button button--ghost topbar-action" type="button" data-nav-view="reports"><svg class="icon"><use href="#icon-report"></use></svg><span>التقارير</span></button>
-          <button class="button button--ghost topbar-action" type="button" data-nav-view="admin" data-role-only="ADMIN"><svg class="icon"><use href="#icon-admin"></use></svg><span>الإدارة</span></button>
-          <div class="topbar-user">
-            <div class="user-copy">
-              <strong id="currentUserName"></strong>
-              <span id="currentUserRole" class="muted"></span>
-            </div>
-            <button id="logoutButton" class="icon-button" type="button" aria-label="تسجيل الخروج" title="تسجيل الخروج">
-              <svg class="icon"><use href="#icon-log-out"></use></svg>
-            </button>
-          </div>
+          <button id="logoutButton" class="icon-button" type="button" aria-label="تسجيل الخروج" title="تسجيل الخروج">
+            <svg class="icon"><use href="#icon-log-out"></use></svg>
+          </button>
         </div>
       </header>
 
+      <aside class="sidebar" aria-label="التنقل الرئيسي">
+        <div class="sidebar-brand">
+          <span class="brand-mark" aria-hidden="true"><svg class="icon icon-lg"><use href="#icon-box"></use></svg></span>
+          <div><strong>مراقبة المخزون</strong><span>مساحة العمل</span></div>
+        </div>
+        <nav class="desktop-nav">
+          <button class="nav-item is-active" type="button" data-nav-view="dashboard" aria-current="page"><svg class="icon"><use href="#icon-dashboard"></use></svg><span>لوحة المتابعة</span></button>
+          <button class="nav-item" type="button" data-nav-view="movements"><svg class="icon"><use href="#icon-movements"></use></svg><span>الحركات</span></button>
+          <button class="nav-item" type="button" data-nav-view="items"><svg class="icon"><use href="#icon-items"></use></svg><span>الأصناف</span></button>
+          <button class="nav-item" type="button" data-nav-view="reports"><svg class="icon"><use href="#icon-report"></use></svg><span>التقارير</span></button>
+          <button class="nav-item" type="button" data-nav-view="admin" data-role-only="ADMIN"><svg class="icon"><use href="#icon-admin"></use></svg><span>الإدارة</span></button>
+        </nav>
+        <div class="sidebar-foot">
+          <span class="status-shape status-shape--ok" aria-hidden="true"></span>
+          <span>اتصال النظام نشط</span>
+        </div>
+      </aside>
+
       <main id="mainContent" class="main-content" tabindex="-1">
-        <aside id="operationRail" class="operation-rail" aria-label="عمليات المخزون اليومية">
-          <section class="panel operation-card operation-card--movement" data-role-any="ADMIN,STOREKEEPER" aria-labelledby="quickMovementTitle">
-            <div class="panel-heading">
-              <div><h2 id="quickMovementTitle">تسجيل حركة صادر / وارد</h2><p class="muted">اختر الصنف، راجع الرصيد المتوقع، ثم رحّل الحركة.</p></div>
-              <svg class="icon panel-icon" aria-hidden="true"><use href="#icon-movements"></use></svg>
-            </div>
-            <form id="quickMovementForm" class="quick-form" novalidate>
-              <fieldset class="movement-type-field">
-                <legend>نوع الحركة المخزنية</legend>
-                <div class="movement-type-choices">
-                  <label class="movement-type-choice movement-type-choice--in">
-                    <input id="quickMovementTypeIn" type="radio" name="quickMovementType" value="IN" checked>
-                    <span class="movement-type-choice__surface"><svg class="icon"><use href="#icon-stock-in"></use></svg><span class="movement-type-choice__copy"><strong>حركة وارد</strong><small>زيادة الرصيد</small></span><span class="movement-type-choice__check" aria-hidden="true"></span></span>
-                  </label>
-                  <label class="movement-type-choice movement-type-choice--out">
-                    <input id="quickMovementTypeOut" type="radio" name="quickMovementType" value="OUT">
-                    <span class="movement-type-choice__surface"><svg class="icon"><use href="#icon-stock-out"></use></svg><span class="movement-type-choice__copy"><strong>حركة صادر</strong><small>خصم من الرصيد</small></span><span class="movement-type-choice__check" aria-hidden="true"></span></span>
-                  </label>
-                </div>
-              </fieldset>
-
-              <div class="field">
-                <label for="quickMovementSearch">ابحث عن الصنف</label>
-                <input id="quickMovementSearch" type="search" autocomplete="off" placeholder="الرمز أو اسم الصنف" aria-describedby="quickMovementSearchHelp">
-                <p id="quickMovementSearchHelp" class="field-help">يمكنك البحث في كامل الدليل مهما كان عدد الأصناف.</p>
-              </div>
-              <div class="field">
-                <label for="quickMovementItem">الصنف المحدد</label>
-                <select id="quickMovementItem" name="itemId" required aria-describedby="quickMovementItemError"><option value="">اختر صنفاً من النتائج</option></select>
-                <p id="quickMovementItemError" class="field-error" aria-live="polite"></p>
-              </div>
-
-              <div id="quickMovementContext" class="movement-context" role="status" aria-live="polite">
-                <div class="movement-context__empty"><svg class="icon"><use href="#icon-info"></use></svg><span>اختر صنفاً لعرض الرصيد الحالي والمتوقع.</span></div>
-              </div>
-
-              <div class="quick-form__split">
-                <div class="field"><label for="quickMovementQuantity">الكمية</label><input id="quickMovementQuantity" name="quantity" type="number" min="0.000001" step="any" inputmode="decimal" required placeholder="0" aria-describedby="quickMovementQuantityError"><p id="quickMovementQuantityError" class="field-error" aria-live="polite"></p></div>
-                <div class="field"><label for="quickMovementDate">تاريخ المستند</label><input id="quickMovementDate" name="documentDate" type="date" required aria-describedby="quickMovementDateError"><p id="quickMovementDateError" class="field-error" aria-live="polite"></p></div>
-              </div>
-              <div class="field"><label for="quickMovementReference">رقم الإذن / الفاتورة</label><input id="quickMovementReference" name="reference" type="text" maxlength="120" required placeholder="مثال: OUT-1042" dir="auto" aria-describedby="quickMovementReferenceError"><p id="quickMovementReferenceError" class="field-error" aria-live="polite"></p></div>
-              <div class="field"><label for="quickMovementParty">الجهة المستفيدة / المورّدة</label><input id="quickMovementParty" name="party" type="text" maxlength="200" required placeholder="القسم المستلم أو اسم المورّد" aria-describedby="quickMovementPartyError"><p id="quickMovementPartyError" class="field-error" aria-live="polite"></p></div>
-              <div class="field"><label for="quickMovementNotes">ملاحظات</label><textarea id="quickMovementNotes" name="notes" maxlength="1000" rows="2" placeholder="تفاصيل إضافية عند الحاجة"></textarea><p class="field-help">اختياري.</p></div>
-              <div class="movement-operator"><svg class="icon"><use href="#icon-user"></use></svg><span>مسؤول الترحيل</span><strong id="quickMovementOperator">—</strong></div>
-              <div id="quickMovementError" class="inline-alert inline-alert--error" role="alert" hidden></div>
-              <button id="quickMovementSubmit" class="button button--movement-in button--block" type="submit"><span class="button__label">ترحيل الإدخال</span><span class="button__spinner" aria-hidden="true"></span></button>
-              <button id="quickMovementCancelCorrection" class="button button--ghost button--block" type="button" hidden>إلغاء التصحيح</button>
-            </form>
-          </section>
-
-          <section id="quickItemPanel" class="panel operation-card operation-card--item" data-role-only="ADMIN" aria-labelledby="quickItemTitle">
-            <div class="panel-heading">
-              <div><h2 id="quickItemTitle">تسجيل صنف جديد</h2><p class="muted">إضافة صنف أو تعديل بياناته الأساسية.</p></div>
-              <svg class="icon panel-icon" aria-hidden="true"><use href="#icon-plus"></use></svg>
-            </div>
-            <form id="quickItemForm" class="quick-form" novalidate>
-              <input id="quickItemId" type="hidden">
-              <div class="quick-form__split quick-form__split--code">
-                <div class="field"><label for="quickItemCode">الرمز</label><input id="quickItemCode" name="code" type="text" maxlength="50" required placeholder="ITEM077" dir="auto"><p class="field-error" aria-live="polite"></p></div>
-                <div class="field"><label for="quickItemName">اسم الصنف</label><input id="quickItemName" name="name" type="text" maxlength="160" required placeholder="الاسم والمواصفة الفنية"><p class="field-error" aria-live="polite"></p></div>
-              </div>
-              <div class="quick-form__split">
-                <div class="field"><label for="quickItemOwner">المالك</label><input id="quickItemOwner" name="owner" type="text" maxlength="100" required placeholder="سلطة المياه"><p class="field-error" aria-live="polite"></p></div>
-                <div class="field"><label for="quickItemUnit">الوحدة</label><input id="quickItemUnit" name="unit" type="text" maxlength="40" required value="قطعة"><p class="field-error" aria-live="polite"></p></div>
-              </div>
-              <div class="quick-form__split">
-                <div id="quickItemOpeningField" class="field"><label for="quickItemOpening">الرصيد الافتتاحي</label><input id="quickItemOpening" name="openingQuantity" type="number" min="0" step="any" value="0" required><p class="field-error" aria-live="polite"></p></div>
-                <div class="field"><label for="quickItemReorder">حد إعادة الطلب</label><input id="quickItemReorder" name="reorderLevel" type="number" min="0" step="any" value="0" required><p class="field-error" aria-live="polite"></p></div>
-              </div>
-              <div class="field"><label for="quickItemActive">حالة الصنف</label><select id="quickItemActive" name="active"><option value="true">نشط</option><option value="false">موقوف</option></select><p class="field-help">الصنف الموقوف يبقى في السجل ولا يقبل حركات جديدة.</p></div>
-              <div id="quickItemError" class="inline-alert inline-alert--error" role="alert" hidden></div>
-              <button id="quickItemSubmit" class="button button--primary button--block" type="submit"><span class="button__label">إضافة الصنف</span><span class="button__spinner" aria-hidden="true"></span></button>
-              <button id="quickItemCancel" class="button button--ghost button--block" type="button" hidden>إلغاء التعديل</button>
-              <button class="button button--secondary button--block" type="button" data-action="import-provided-catalog"><svg class="icon"><use href="#icon-download"></use></svg><span>إضافة القائمة الجاهزة (76)</span></button>
-            </form>
-          </section>
-        </aside>
-
         <section id="view-dashboard" class="app-view is-active" data-view="dashboard" aria-labelledby="dashboardTitle">
           <div class="view-heading view-heading--dashboard">
             <div><h1 id="dashboardTitle">لوحة المتابعة</h1><p id="dashboardSubtitle" class="muted"></p></div>
@@ -229,8 +161,8 @@
                 <label><input type="radio" name="dashboardDays" value="90"><span>90 يوماً</span></label>
               </fieldset>
               <div class="movement-actions" data-role-any="ADMIN,STOREKEEPER" aria-label="تسجيل حركة مخزون">
-                <button class="button button--movement-in" type="button" data-action="focus-movement-in"><svg class="icon"><use href="#icon-stock-in"></use></svg><span>إدخال مخزون</span></button>
-                <button class="button button--movement-out" type="button" data-action="focus-movement-out"><svg class="icon"><use href="#icon-stock-out"></use></svg><span>صرف مخزون</span></button>
+                <button class="button button--movement-in" type="button" data-action="movement-in"><svg class="icon"><use href="#icon-stock-in"></use></svg><span>إدخال مخزون</span></button>
+                <button class="button button--movement-out" type="button" data-action="movement-out"><svg class="icon"><use href="#icon-stock-out"></use></svg><span>صرف مخزون</span></button>
               </div>
             </div>
           </div>
@@ -253,10 +185,6 @@
               <div class="panel-heading"><div><h2>توزيع حالة الأصناف</h2><p class="muted">قراءة مجمّعة قابلة للمقارنة مهما زاد عدد الأصناف.</p></div></div>
               <div id="stockOverview"></div>
             </article>
-            <article class="panel dashboard-panel dashboard-panel--owners">
-              <div class="panel-heading"><div><h2>مالكو الأصناف</h2><p class="muted">توزيع الدليل حسب الجهة المالكة.</p></div><svg class="icon panel-icon" aria-hidden="true"><use href="#icon-admin"></use></svg></div>
-              <div id="ownersSummary" class="owners-summary" aria-live="polite"></div>
-            </article>
             <article class="panel dashboard-panel dashboard-panel--urgent">
               <div class="panel-heading"><div><h2>أصناف تحتاج إجراء</h2><p class="muted">النافد أولاً، ثم الأقرب إلى حد إعادة الطلب.</p></div><button class="button button--ghost" type="button" data-nav-view="items">كل الأصناف<svg class="icon"><use href="#icon-chevron-left"></use></svg></button></div>
               <div id="urgentItems"></div>
@@ -268,19 +196,18 @@
           </div>
         </section>
 
-        <section id="view-movements" class="app-view" data-view="movements" aria-labelledby="movementsTitle">
+        <section id="view-movements" class="app-view" data-view="movements" aria-labelledby="movementsTitle" hidden>
           <div class="view-heading">
             <div><p class="eyebrow">سجل غير قابل للمحو</p><h1 id="movementsTitle">حركات المخزون</h1><p class="muted">كل إدخال أو صرف أو عكس موثّق باسم المستخدم والوقت.</p></div>
             <div class="movement-actions" data-role-any="ADMIN,STOREKEEPER" aria-label="تسجيل حركة مخزون">
-                <button class="button button--movement-in" type="button" data-action="focus-movement-in"><svg class="icon"><use href="#icon-stock-in"></use></svg><span>إدخال مخزون</span></button>
-                <button class="button button--movement-out" type="button" data-action="focus-movement-out"><svg class="icon"><use href="#icon-stock-out"></use></svg><span>صرف مخزون</span></button>
+              <button class="button button--movement-in" type="button" data-action="movement-in"><svg class="icon"><use href="#icon-stock-in"></use></svg><span>إدخال مخزون</span></button>
+              <button class="button button--movement-out" type="button" data-action="movement-out"><svg class="icon"><use href="#icon-stock-out"></use></svg><span>صرف مخزون</span></button>
             </div>
           </div>
           <form id="movementFilters" class="filter-bar" aria-label="تصفية الحركات">
             <div class="field field--compact field--grow"><label for="movementQuery">بحث عام</label><input id="movementQuery" name="query" type="search" placeholder="رقم الحركة، المرجع، الجهة"></div>
             <div class="field field--compact"><label for="movementTypeFilter">نوع الحركة</label><select id="movementTypeFilter" name="type"><option value="">الكل</option><option value="IN">إدخال</option><option value="OUT">صرف</option><option value="REVERSAL">عكس</option></select></div>
             <div class="field field--compact field--grow"><label for="movementItemFilter">الصنف</label><input id="movementItemFilter" name="itemQuery" type="search" placeholder="اسم الصنف أو رمزه أو مالكه" autocomplete="off"></div>
-            <div class="field field--compact"><label for="movementOwnerFilter">المالك</label><select id="movementOwnerFilter" name="owner"><option value="">كل المالكين</option></select></div>
             <div class="field field--compact"><label for="movementDateFrom">من تاريخ</label><input id="movementDateFrom" name="dateFrom" type="date"></div>
             <div class="field field--compact"><label for="movementDateTo">إلى تاريخ</label><input id="movementDateTo" name="dateTo" type="date"></div>
             <button class="button button--secondary filter-submit" type="submit"><svg class="icon"><use href="#icon-filter"></use></svg><span>تطبيق</span></button>
@@ -364,12 +291,12 @@
           </nav>
         </section>
 
-        <section id="view-items" class="app-view" data-view="items" aria-labelledby="itemsTitle">
+        <section id="view-items" class="app-view" data-view="items" aria-labelledby="itemsTitle" hidden>
           <div class="view-heading">
             <div><p class="eyebrow">دليل المستودع</p><h1 id="itemsTitle">الأصناف</h1><p class="muted">الكميات الحالية وحدود إعادة الطلب.</p></div>
             <div class="view-heading__actions" data-role-only="ADMIN">
               <button class="button button--secondary" type="button" data-action="import-provided-catalog"><svg class="icon"><use href="#icon-download"></use></svg><span>إضافة القائمة الجاهزة (76)</span></button>
-              <button class="button button--primary" type="button" data-action="focus-new-item"><svg class="icon"><use href="#icon-plus"></use></svg><span>إضافة صنف</span></button>
+              <button class="button button--primary" type="button" data-action="new-item"><svg class="icon"><use href="#icon-plus"></use></svg><span>إضافة صنف</span></button>
             </div>
           </div>
           <form id="itemFilters" class="filter-bar" aria-label="تصفية الأصناف">
@@ -383,7 +310,7 @@
           <div class="table-frame">
             <table>
               <caption class="sr-only">قائمة أصناف المخزون</caption>
-              <thead><tr><th scope="col">الرمز</th><th scope="col">الصنف</th><th scope="col">المالك</th><th scope="col">الوحدة</th><th scope="col">الافتتاحي</th><th scope="col">الوارد</th><th scope="col">الصادر</th><th scope="col">الرصيد الحالي</th><th scope="col">حد الطلب</th><th scope="col">الحالة</th><th scope="col"><span class="sr-only">إجراءات</span></th></tr></thead>
+              <thead><tr><th scope="col">الرمز</th><th scope="col">الصنف</th><th scope="col">المالك</th><th scope="col">الوحدة</th><th scope="col">الكمية الحالية</th><th scope="col">الحد الأدنى</th><th scope="col">الحالة</th><th scope="col"><span class="sr-only">إجراءات</span></th></tr></thead>
               <tbody id="itemsTableBody"></tbody>
             </table>
           </div>
@@ -394,13 +321,7 @@
           </nav>
         </section>
 
-        <dialog id="reportsDialog" class="app-dialog app-dialog--wide utility-dialog" aria-labelledby="reportsTitle">
-          <div class="dialog-head">
-            <div><h2>التقارير والنسخ الاحتياطية</h2><p class="muted">تصدير البيانات وإدارة النسخ الكاملة.</p></div>
-            <button id="reportsDialogClose" class="icon-button" type="button" aria-label="إغلاق التقارير"><svg class="icon"><use href="#icon-close"></use></svg></button>
-          </div>
-          <div class="dialog-body utility-dialog__body">
-        <section id="view-reports" class="app-view utility-view" data-view="reports" aria-labelledby="reportsTitle">
+        <section id="view-reports" class="app-view" data-view="reports" aria-labelledby="reportsTitle" hidden>
           <div class="view-heading">
             <div><p class="eyebrow">تصدير ومراجعة</p><h1 id="reportsTitle">التقارير والنسخ الاحتياطية</h1><p class="muted">نزّل البيانات الظاهرة أو أنشئ نسخة Excel كاملة وآمنة.</p></div>
           </div>
@@ -425,16 +346,8 @@
             <div class="table-frame table-frame--embedded"><table><caption class="sr-only">تقرير حالة الأصناف</caption><thead><tr><th scope="col">الرمز</th><th scope="col">الصنف</th><th scope="col">المالك</th><th scope="col">الكمية</th><th scope="col">الحد الأدنى</th><th scope="col">الحالة</th></tr></thead><tbody id="reportTableBody"></tbody></table></div>
           </article>
         </section>
-          </div>
-        </dialog>
 
-        <dialog id="adminDialog" class="app-dialog app-dialog--wide utility-dialog" aria-labelledby="adminTitle">
-          <div class="dialog-head">
-            <div><h2>إدارة النظام</h2><p class="muted">المستخدمون والأدوار وإجراءات المدير.</p></div>
-            <button id="adminDialogClose" class="icon-button" type="button" aria-label="إغلاق الإدارة"><svg class="icon"><use href="#icon-close"></use></svg></button>
-          </div>
-          <div class="dialog-body utility-dialog__body">
-        <section id="view-admin" class="app-view utility-view" data-view="admin" aria-labelledby="adminTitle">
+        <section id="view-admin" class="app-view" data-view="admin" aria-labelledby="adminTitle" hidden>
           <div class="view-heading">
             <div><p class="eyebrow">مدير النظام فقط</p><h1 id="adminTitle">المستخدمون والصلاحيات</h1><p class="muted">تُراجع الصلاحيات في الخادم عند كل عملية، بصرف النظر عن ظهور الأزرار هنا.</p></div>
             <button class="button button--primary" type="button" data-action="new-user"><svg class="icon"><use href="#icon-plus"></use></svg><span>إضافة مستخدم</span></button>
@@ -459,13 +372,11 @@
             <button id="usersNext" class="button button--secondary" type="button"><span>التالي</span><svg class="icon"><use href="#icon-chevron-left"></use></svg></button>
           </nav>
         </section>
-          </div>
-        </dialog>
       </main>
 
       <footer class="app-footer"><span>مراقبة المخزون</span><span id="footerSession"></span></footer>
 
-      <nav class="mobile-nav" aria-label="اختصارات مساحة العمل">
+      <nav class="mobile-nav" aria-label="التنقل الرئيسي للأجهزة المحمولة">
         <button class="mobile-nav__item is-active" type="button" data-nav-view="dashboard" aria-current="page"><svg class="icon"><use href="#icon-dashboard"></use></svg><span>الرئيسية</span></button>
         <button class="mobile-nav__item" type="button" data-nav-view="movements"><svg class="icon"><use href="#icon-movements"></use></svg><span>الحركات</span></button>
         <button class="mobile-nav__item" type="button" data-nav-view="items"><svg class="icon"><use href="#icon-items"></use></svg><span>الأصناف</span></button>

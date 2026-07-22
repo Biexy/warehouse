@@ -1,5 +1,18 @@
 [
   {
+    "date": "2026-07-22",
+    "scope": "app",
+    "macrostructure": "Workbench — form-rail variant",
+    "variation_knobs": "single continuous page / persistent operation rail / anchored data sections / modal utilities / no sidebar",
+    "theme": "custom",
+    "theme_axes": "dark / geometric-sans / cool",
+    "vibe": "industrial precision, Arabic, cool, operational",
+    "enrichment": "none",
+    "nav": "N13",
+    "footer": "Ft2",
+    "brief": "Upgrade the supplied Arabic one-page warehouse workflow without replacing it"
+  },
+  {
     "date": "2026-07-21",
     "scope": "app",
     "macrostructure": "Workbench",

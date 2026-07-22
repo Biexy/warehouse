@@ -663,12 +663,6 @@ function appendMovementRecord_(record) {
   return record;
 }
 
-function appendMovementRecords_(records) {
-  var rowNumbers = appendMappedRows_('MOVEMENTS', records);
-  records.forEach(function (record, index) { record.rowNumber = rowNumbers[index]; });
-  return records;
-}
-
 function appendAuditRecord_(input) {
   var actor = input.actor || {};
   var details = input.details === undefined ? {} : input.details;

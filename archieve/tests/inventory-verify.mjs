@@ -16,9 +16,6 @@ function dateKey(value, timeZone) {
 const context = vm.createContext({
   console,
   Utilities: {
-    getUuid() {
-      return `test-${Math.random().toString(36).slice(2)}-${Date.now()}`;
-    },
     formatDate(value, timeZone, pattern) {
       if (pattern !== 'yyyy-MM-dd') throw new Error(`Unsupported test date pattern: ${pattern}`);
       return dateKey(value, timeZone);
@@ -95,8 +92,8 @@ assert.equal(context.reversalRequestMatches_(storedReversal, { ...reversalReques
 // Report quantities are separated by unit. Current balances use the complete
 // ledger, while flow values use the complete filtered set passed to summary.
 const items = [
-  { id: 'ITM-KG', code: 'KG-1', name: 'Powder', owner: 'مصلحة المياه', unit: 'kg', openingQuantity: 10, reorderLevel: 0, active: true },
-  { id: 'ITM-PC', code: 'PC-1', name: 'Valve', owner: 'سلطة المياه', unit: 'piece', openingQuantity: 20, reorderLevel: 0, active: true }
+  { id: 'ITM-KG', code: 'KG-1', name: 'Powder', owner: 'مصلحة المياه', unit: 'kg', openingQuantity: 10 },
+  { id: 'ITM-PC', code: 'PC-1', name: 'Valve', owner: 'سلطة المياه', unit: 'piece', openingQuantity: 20 }
 ];
 const movements = [
   { id: 'M1', type: 'IN', itemId: 'ITM-KG', itemCode: 'KG-1', itemName: 'Powder', quantity: 5, netChange: 5 },
@@ -134,48 +131,6 @@ const ownerFiltered = context.listMovements('token', { itemQuery: 'سلطة ال
 assert.equal(ownerFiltered.ok, true);
 assert.equal(ownerFiltered.data.total, 1);
 assert.equal(ownerFiltered.data.movements[0].itemId, 'ITM-PC');
-const explicitOwnerFiltered = context.listMovements('token', { owner: 'مصلحة المياه', page: 1, pageSize: 25 });
-assert.equal(explicitOwnerFiltered.ok, true);
-assert.equal(explicitOwnerFiltered.data.total, 3);
-assert.ok(explicitOwnerFiltered.data.movements.every((movement) => movement.itemId === 'ITM-KG'));
-
-// A correction validates both halves before one batch append. Retrying the
-// same client request returns the same reversal/replacement without new rows.
-context.requireSession_ = () => ({ user: { id: 'USR-1', username: 'admin', displayName: 'Admin', role: 'ADMIN' } });
-context.preflightInventoryMutation_ = () => {};
-context.withScriptLock_ = (callable) => callable();
-context.appendCommittedInventoryAudit_ = () => null;
-context.appendMovementRecords_ = (records) => {
-  records.forEach((record, index) => {
-    record.rowNumber = movements.length + index + 2;
-    movements.push(record);
-  });
-  return records;
-};
-const correctionPayload = {
-  movementId: 'M4',
-  reason: 'Correct quantity',
-  clientRequestId: 'correction_test_001',
-  itemId: 'ITM-PC',
-  type: 'OUT',
-  quantity: 3,
-  documentDate: '2026-07-20',
-  party: 'Maintenance',
-  reference: 'OUT-CORRECTED',
-  notes: 'Replacement for M4'
-};
-const corrected = context.correctMovement('token', correctionPayload);
-assert.equal(corrected.ok, true);
-assert.equal(corrected.data.reversal.type, 'REVERSAL');
-assert.equal(corrected.data.movement.type, 'OUT');
-assert.equal(corrected.data.reversal.balanceAfter, 20);
-assert.equal(corrected.data.movement.balanceBefore, 20);
-assert.equal(corrected.data.movement.balanceAfter, 17);
-assert.equal(movements.length, 6);
-const correctedRetry = context.correctMovement('token', correctionPayload);
-assert.equal(correctedRetry.ok, true);
-assert.equal(correctedRetry.data.deduplicated, true);
-assert.equal(movements.length, 6);
 context.requireSession_ = originalRequireSession;
 context.ensureRepositorySchemaCurrent_ = originalEnsureSchema;
 context.allItemRecords_ = originalAllItems;
@@ -219,6 +174,5 @@ console.log('inventory validation/idempotency: ok');
 console.log('inventory lifecycle guards: ok');
 console.log('movement report unit grouping: ok');
 console.log('movement item search across the complete catalog: ok');
-console.log('atomic correction and retry deduplication: ok');
 console.log('template-row filtering: ok');
 console.log('quantity safety bound: ok');

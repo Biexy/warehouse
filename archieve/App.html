@@ -65,14 +65,7 @@
     dialogOperationId: 0,
     dialogPending: false,
     credentials: null,
-    loginUsername: '',
-    quickMovementItems: [],
-    quickMovementSearchTimer: 0,
-    quickMovementRequestId: 0,
-    quickMovementClientRequestId: '',
-    quickMovementCorrection: null,
-    quickItemEditing: null,
-    pendingRpcCount: 0
+    loginUsername: ''
   };
 
   var dom = {};
@@ -83,10 +76,6 @@
     bindStaticEvents();
     bindTouchedValidation(dom.loginForm);
     bindTouchedValidation(dom.passwordChangeForm, passwordValidators());
-    bindTouchedValidation(dom.quickMovementForm, quickMovementValidators());
-    bindTouchedValidation(dom.quickItemForm);
-    dom.quickMovementDate.value = localDateKey(new Date());
-    state.quickMovementClientRequestId = newClientRequestId();
     showLogin();
     storeToken(readStoredToken());
     if (state.token) resumeSession();
@@ -102,7 +91,6 @@
       'movementSummary', 'movementTrend', 'movementTrendData', 'movementTrendTable',
       'stockOverview', 'urgentItems', 'recentMovements',
       'movementFilters', 'movementQuery', 'movementTypeFilter', 'movementItemFilter',
-      'movementOwnerFilter',
       'movementDateFrom', 'movementDateTo', 'movementsState', 'movementsTableBody',
       'movementReportPanel', 'movementReportState', 'movementReportByUnit',
       'movementReportItemsTable', 'movementReportItemsBody', 'exportMovementExcel',
@@ -118,17 +106,7 @@
       'newPassword', 'confirmPassword', 'passwordStrength', 'passwordChangeError',
       'passwordChangeSubmit', 'credentialsDialog', 'credentialUsername',
       'credentialPassword', 'credentialsCopyStatus', 'copyCredentialsButton',
-      'credentialsDoneButton', 'syncIndicator', 'syncStatusText', 'operationRail',
-      'quickMovementForm', 'quickMovementTypeIn', 'quickMovementTypeOut',
-      'quickMovementSearch', 'quickMovementItem', 'quickMovementContext',
-      'quickMovementQuantity', 'quickMovementDate', 'quickMovementReference',
-      'quickMovementParty', 'quickMovementNotes', 'quickMovementOperator',
-      'quickMovementError', 'quickMovementSubmit', 'quickMovementCancelCorrection', 'quickItemPanel', 'quickItemForm',
-      'quickItemId', 'quickItemCode', 'quickItemName', 'quickItemOwner',
-      'quickItemUnit', 'quickItemOpeningField', 'quickItemOpening', 'quickItemReorder',
-      'quickItemActive', 'quickItemError', 'quickItemSubmit', 'quickItemCancel',
-      'ownersSummary', 'reportsDialog', 'reportsDialogClose', 'adminDialog',
-      'adminDialogClose'
+      'credentialsDoneButton'
     ].forEach(function (id) { dom[id] = document.getElementById(id); });
   }
 
@@ -137,21 +115,6 @@
     dom.passwordChangeForm.addEventListener('submit', handlePasswordChange);
     dom.newPassword.addEventListener('input', updatePasswordStrength);
     dom.logoutButton.addEventListener('click', handleLogout);
-    dom.quickMovementForm.addEventListener('submit', handleQuickMovementSubmit);
-    dom.quickMovementCancelCorrection.addEventListener('click', resetQuickMovementForm);
-    dom.quickMovementSearch.addEventListener('input', scheduleQuickMovementSearch);
-    dom.quickMovementItem.addEventListener('change', renderQuickMovementPreview);
-    dom.quickMovementQuantity.addEventListener('input', renderQuickMovementPreview);
-    dom.quickMovementTypeIn.addEventListener('change', updateQuickMovementType);
-    dom.quickMovementTypeOut.addEventListener('change', updateQuickMovementType);
-    dom.quickItemForm.addEventListener('submit', handleQuickItemSubmit);
-    dom.quickItemCancel.addEventListener('click', resetQuickItemForm);
-    dom.reportsDialogClose.addEventListener('click', function () { dom.reportsDialog.close(); });
-    dom.adminDialogClose.addEventListener('click', function () { dom.adminDialog.close(); });
-    [dom.reportsDialog, dom.adminDialog].forEach(function (dialog) {
-      dialog.addEventListener('click', closeDialogFromBackdrop);
-      dialog.addEventListener('close', restoreDialogFocus);
-    });
 
     document.addEventListener('click', function (event) {
       var navButton = event.target.closest('[data-nav-view]');
@@ -288,16 +251,13 @@
   }
 
   function runRpc(method, args) {
-    beginSync();
     return new Promise(function (resolve, reject) {
       if (!window.google || !google.script || !google.script.run) {
-        endSync(false);
         reject(appError('RPC_UNAVAILABLE', 'تعذّر الاتصال بتطبيق Google Apps Script. افتح رابط النشر التنفيذي من جديد.'));
         return;
       }
       var runner = google.script.run
         .withSuccessHandler(function (response) {
-          endSync(true);
           if (response && response.ok === true) {
             resolve(response.data);
             return;
@@ -313,7 +273,6 @@
           resolve(response);
         })
         .withFailureHandler(function (failure) {
-          endSync(false);
           reject(appError('RPC_FAILURE', failure && failure.message ? failure.message : 'فشل الاتصال بالخادم.'));
         });
 
@@ -321,24 +280,9 @@
         if (args.length === 1) runner[method](args[0]);
         else runner[method](args[0], args[1]);
       } catch (error) {
-        endSync(false);
         reject(appError('RPC_FAILURE', error && error.message ? error.message : 'تعذّر إرسال الطلب.'));
       }
     });
-  }
-
-  function beginSync() {
-    state.pendingRpcCount += 1;
-    if (!dom.syncIndicator || !dom.syncStatusText) return;
-    dom.syncIndicator.dataset.state = 'loading';
-    dom.syncStatusText.textContent = 'جارٍ التحديث…';
-  }
-
-  function endSync(success) {
-    state.pendingRpcCount = Math.max(0, state.pendingRpcCount - 1);
-    if (!dom.syncIndicator || !dom.syncStatusText || state.pendingRpcCount) return;
-    dom.syncIndicator.dataset.state = success ? 'success' : 'error';
-    dom.syncStatusText.textContent = success ? 'متصل بالنظام' : 'تعذّر الاتصال';
   }
 
   function appError(code, message, details) {
@@ -530,13 +474,6 @@
       users: { page: 1, pageSize: PAGE_SIZE, total: 0, hasMore: false }
     };
     state.credentials = null;
-    state.quickMovementItems = [];
-    state.quickMovementRequestId += 1;
-    window.clearTimeout(state.quickMovementSearchTimer);
-    state.quickMovementClientRequestId = newClientRequestId();
-    state.quickMovementCorrection = null;
-    state.quickItemEditing = null;
-    if (dom.appShell) dom.appShell.removeAttribute('data-role');
     window.clearTimeout(state.globalSearchTimer);
     state.globalSearchRequestId += 1;
     resetFilterControls();
@@ -548,7 +485,6 @@
     dom.movementQuery.value = '';
     dom.movementTypeFilter.value = '';
     dom.movementItemFilter.value = '';
-    dom.movementOwnerFilter.value = '';
     dom.movementDateFrom.value = '';
     dom.movementDateTo.value = '';
     dom.itemQuery.value = '';
@@ -565,16 +501,12 @@
     if (dom.passwordChangeDialog.open) dom.passwordChangeDialog.close();
     if (dom.entityDialog.open) dom.entityDialog.close();
     if (dom.credentialsDialog.open) dom.credentialsDialog.close();
-    if (dom.reportsDialog.open) dom.reportsDialog.close();
-    if (dom.adminDialog.open) dom.adminDialog.close();
     showLogin();
     showInlineError(dom.loginError, message || 'انتهت جلسة الدخول. سجّل الدخول من جديد.');
     announce(message || 'انتهت جلسة الدخول.');
   }
 
   function showLogin() {
-    if (dom.reportsDialog && dom.reportsDialog.open) dom.reportsDialog.close();
-    if (dom.adminDialog && dom.adminDialog.open) dom.adminDialog.close();
     dom.appShell.hidden = true;
     dom.loginView.hidden = false;
     document.body.classList.remove('is-authenticated');
@@ -587,17 +519,9 @@
     document.body.classList.add('is-authenticated');
     applyRoleVisibility();
     renderUserIdentity();
-    populateQuickMovementItems(state.catalogItems);
-    resetQuickMovementForm();
-    resetQuickItemForm();
     renderDashboard();
     renderReport();
-    document.querySelectorAll('#view-dashboard, #view-items, #view-movements').forEach(function (section) {
-      section.hidden = false;
-      section.classList.add('is-active');
-    });
-    loadItems();
-    loadMovements();
+    navigate(viewFromHash(), { updateHash: false, focus: false });
     window.scrollTo({ top: 0, behavior: 'auto' });
     announce('تم تحميل مساحة العمل.');
   }
@@ -616,9 +540,6 @@
     state.loaded.dashboard = true;
     state.dashboardLoadedDays = state.dashboard && state.dashboard.range && Number(state.dashboard.range.days) || (state.dashboard ? DASHBOARD_DEFAULT_DAYS : 0);
     renderItemOwnerOptions(state.itemOwners);
-    renderMovementOwnerOptions(state.itemOwners);
-    populateQuickMovementItems(state.catalogItems);
-    if (state.user) dom.quickMovementOperator.textContent = state.user.displayName || state.user.username || '—';
   }
 
   function normalizeCollection(value, key) {
@@ -636,7 +557,6 @@
 
   function applyRoleVisibility() {
     var role = state.user && state.user.role;
-    dom.appShell.setAttribute('data-role', role || '');
     document.querySelectorAll('[data-role-only]').forEach(function (element) {
       element.hidden = element.getAttribute('data-role-only') !== role;
     });
@@ -644,7 +564,6 @@
       var allowed = element.getAttribute('data-role-any').split(',').map(function (entry) { return entry.trim(); });
       element.hidden = allowed.indexOf(role) === -1;
     });
-    dom.operationRail.hidden = role === 'AUDITOR';
     /* Presentation only: every corresponding server RPC performs its own role check. */
   }
 
@@ -657,28 +576,26 @@
     if (!VIEW_LABELS[view]) view = 'dashboard';
     if (view === 'admin' && (!state.user || state.user.role !== 'ADMIN')) view = 'dashboard';
     state.currentView = view;
+    document.querySelectorAll('.app-view').forEach(function (section) {
+      var active = section.getAttribute('data-view') === view;
+      section.hidden = !active;
+      section.classList.toggle('is-active', active);
+    });
     document.querySelectorAll('[data-nav-view]').forEach(function (button) {
       var active = button.getAttribute('data-nav-view') === view;
       button.classList.toggle('is-active', active);
       if (active) button.setAttribute('aria-current', 'page');
       else button.removeAttribute('aria-current');
     });
-    if (options.updateHash !== false && view !== 'reports' && view !== 'admin') {
+    if (options.updateHash !== false) {
       try { history.replaceState(null, '', '#' + view); }
       catch (ignored) { location.hash = view; }
     }
     closeSearchResults();
     ensureViewData(view);
-    if (view === 'reports') {
-      state.dialogReturnFocus = document.activeElement;
-      if (!dom.reportsDialog.open) dom.reportsDialog.showModal();
-    } else if (view === 'admin') {
-      state.dialogReturnFocus = document.activeElement;
-      if (!dom.adminDialog.open) dom.adminDialog.showModal();
-    } else {
-      var target = document.querySelector('[data-view="' + view + '"]');
-      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      if (options.focus && target) target.focus({ preventScroll: true });
+    if (options.focus) {
+      dom.mainContent.focus({ preventScroll: true });
+      window.scrollTo({ top: 0, behavior: 'auto' });
     }
     announce('عرض ' + VIEW_LABELS[view]);
   }
@@ -701,9 +618,6 @@
     else if (action === 'movement-out') openMovementForm(source, 'OUT');
     else if (action === 'new-movement') openMovementForm(source, 'IN');
     else if (action === 'new-item') openItemForm(null, source);
-    else if (action === 'focus-movement-in') focusQuickMovement('IN');
-    else if (action === 'focus-movement-out') focusQuickMovement('OUT');
-    else if (action === 'focus-new-item') focusQuickItemForm();
     else if (action === 'import-provided-catalog') openProvidedCatalogImport(source);
     else if (action === 'new-user') openUserForm(null, source);
   }
@@ -804,7 +718,6 @@
     renderMovementSummary(dashboard, trend, flow);
     renderMovementTrend(trend);
     renderStockOverview(counts);
-    renderOwnersSummary(dashboard);
     renderUrgentItems(dashboard);
     renderRecentMovements();
   }
@@ -1068,7 +981,7 @@
       if (!entry.value) return;
       var segment = createElement('span', 'status-distribution__segment status-distribution__segment--' + entry.tone);
       segment.style.flexGrow = String(entry.value);
-      segment.title = entry.label + ': ' + formatNumber(entry.value) + ' (' + formatNumber(roundPercent(entry.value, total)) + '٪)';
+      segment.title = entry.label + ': ' + formatNumber(entry.value) + ' (' + formatNumber(entry.value * 100 / total) + '٪)';
       segment.setAttribute('aria-hidden', 'true');
       stack.appendChild(segment);
     });
@@ -1079,41 +992,10 @@
       copy.appendChild(statusShape(itemStatus({ status: entry.status, active: entry.status !== 'INACTIVE' })));
       copy.appendChild(createText('span', '', entry.label));
       var values = createElement('span', 'stock-list__values');
-      append(values, createText('strong', 'mono', formatNumber(entry.value)), createText('small', '', formatNumber(roundPercent(entry.value, total)) + '٪'));
+      append(values, createText('strong', 'mono', formatNumber(entry.value)), createText('small', '', formatNumber(entry.value * 100 / total) + '٪'));
       append(row, copy, values); list.appendChild(row);
     });
     append(dom.stockOverview, stack, list);
-  }
-
-  function roundPercent(value, total) {
-    return total ? Math.round((Number(value) || 0) * 1000 / total) / 10 : 0;
-  }
-
-  function renderOwnersSummary(dashboard) {
-    clearNode(dom.ownersSummary);
-    var owners = Array.isArray(dashboard && dashboard.ownerSummary) ? dashboard.ownerSummary : [];
-    if (!owners.length) {
-      dom.ownersSummary.appendChild(createText('p', 'muted', state.itemOwners.length ? state.itemOwners.join(' · ') : 'لا يوجد مالكون مسجلون بعد.'));
-      return;
-    }
-    owners.slice(0, 8).forEach(function (owner) {
-      var button = createElement('button', 'owner-row');
-      button.type = 'button';
-      button.setAttribute('aria-label', 'عرض أصناف ' + (owner.owner || 'غير محدد'));
-      var copy = createElement('span', 'owner-row__copy');
-      append(copy,
-        createText('strong', '', owner.owner || 'غير محدد'),
-        createText('small', 'muted', formatNumber(owner.itemCount || 0) + ' صنف · ' + formatNumber(owner.actionNeededCount || 0) + ' يحتاج إجراء')
-      );
-      append(button, copy, createText('span', 'owner-row__quantity mono', formatNumber(owner.currentQuantity || 0)));
-      button.addEventListener('click', function () {
-        dom.itemOwnerFilter.value = owner.owner || '';
-        state.paging.items.page = 1;
-        loadItems();
-        navigate('items', { focus: false });
-      });
-      dom.ownersSummary.appendChild(button);
-    });
   }
 
   function renderUrgentItems(dashboard) {
@@ -1266,7 +1148,6 @@
       query: dom.movementQuery.value.trim(),
       type: dom.movementTypeFilter.value,
       itemQuery: dom.movementItemFilter.value.trim(),
-      owner: dom.movementOwnerFilter.value,
       dateFrom: dom.movementDateFrom.value,
       dateTo: dom.movementDateTo.value,
       page: state.paging.movements.page,
@@ -1277,7 +1158,6 @@
       type: params.type,
       itemQuery: params.itemQuery,
       itemLabel: params.itemQuery || 'كل الأصناف',
-      owner: params.owner,
       dateFrom: params.dateFrom,
       dateTo: params.dateTo
     };
@@ -1433,11 +1313,8 @@
       actions.setAttribute('data-label', 'إجراءات');
       var reversible = canWriteMovements() && String(movement.type || '').toUpperCase() !== 'REVERSAL' && movement.canReverse !== false && movement.reversed !== true;
       if (reversible) {
-        var correct = actionButton('edit', 'تصحيح الحركة', 'button button--ghost');
-        correct.addEventListener('click', function () { openCorrectionDialog(movement, correct); });
         var reverse = actionButton('undo', 'عكس الحركة', 'button button--ghost');
         reverse.addEventListener('click', function () { openReverseDialog(movement, reverse); });
-        actions.appendChild(correct);
         actions.appendChild(reverse);
       } else {
         actions.appendChild(createText('span', 'muted', '—'));
@@ -1463,7 +1340,6 @@
       if (data && Array.isArray(data.owners)) {
         state.itemOwners = data.owners.slice();
         renderItemOwnerOptions(state.itemOwners);
-        renderMovementOwnerOptions(state.itemOwners);
       }
       state.lastResponses.items = data || {};
       state.loaded.items = true;
@@ -1488,21 +1364,17 @@
       addCell(tr, 'الصنف', item.name || '—');
       addCell(tr, 'المالك', item.owner || 'غير محدد');
       addCell(tr, 'الوحدة', item.unit || '—');
-      addCell(tr, 'الرصيد الافتتاحي', formatNumber(item.openingQuantity || 0), { mono: true });
-      addCell(tr, 'إجمالي الوارد', formatNumber(item.totalIncoming || 0), { mono: true });
-      addCell(tr, 'إجمالي الصادر', formatNumber(item.totalOutgoing || 0), { mono: true });
-      addCell(tr, 'الرصيد الحالي', formatNumber(itemQuantity(item)), { mono: true });
-      addCell(tr, 'حد إعادة الطلب', formatNumber(item.reorderLevel || 0), { mono: true });
+      addCell(tr, 'الكمية الحالية', formatNumber(itemQuantity(item)), { mono: true });
+      addCell(tr, 'الحد الأدنى', formatNumber(item.reorderLevel || 0), { mono: true });
       addCell(tr, 'الحالة', stockStatusBadge(item));
       var actions = createElement('td', 'table-actions');
       actions.setAttribute('data-label', 'إجراءات');
-      var details = actionButton('report', 'بطاقة الصنف', 'button button--ghost');
-      details.addEventListener('click', function () { openItemDetails(item, details); });
-      actions.appendChild(details);
       if (state.user && state.user.role === 'ADMIN') {
         var edit = actionButton('edit', 'تعديل', 'button button--ghost');
-        edit.addEventListener('click', function () { editQuickItem(item); });
+        edit.addEventListener('click', function () { openItemForm(item, edit); });
         actions.appendChild(edit);
+      } else {
+        actions.appendChild(createText('span', 'muted', 'للقراءة فقط'));
       }
       tr.appendChild(actions);
       dom.itemsTableBody.appendChild(tr);
@@ -1530,21 +1402,6 @@
     });
     if (Array.prototype.some.call(dom.itemOwnerFilter.options, function (option) { return option.value === current; })) {
       dom.itemOwnerFilter.value = current;
-    }
-  }
-
-  function renderMovementOwnerOptions(owners) {
-    if (!dom.movementOwnerFilter) return;
-    var current = dom.movementOwnerFilter.value;
-    while (dom.movementOwnerFilter.options.length > 1) dom.movementOwnerFilter.remove(1);
-    (owners || []).forEach(function (owner) {
-      var option = document.createElement('option');
-      option.value = owner;
-      option.textContent = owner;
-      dom.movementOwnerFilter.appendChild(option);
-    });
-    if (Array.prototype.some.call(dom.movementOwnerFilter.options, function (option) { return option.value === current; })) {
-      dom.movementOwnerFilter.value = current;
     }
   }
 
@@ -1737,227 +1594,6 @@
     var badge = createElement('span', 'status-badge status-badge--' + status.tone);
     append(badge, statusShape(status), createText('span', '', status.label));
     return badge;
-  }
-
-  function quickMovementValidators() {
-    return {
-      itemId: function () {
-        return selectedQuickMovementItem() ? '' : 'اختر صنفاً من نتائج البحث.';
-      },
-      quantity: function (input) {
-        var quantity = Number(input.value);
-        if (!isFinite(quantity) || quantity <= 0) return 'أدخل كمية أكبر من صفر.';
-        var item = selectedQuickMovementItem();
-        if (item && quickMovementType() === 'OUT' && quantity > itemQuantity(item) + 0.0000001) {
-          return 'الكمية المصروفة أكبر من الرصيد الحالي. خفّض الكمية أو اختر صنفاً آخر.';
-        }
-        return '';
-      },
-      documentDate: function (input) { return input.value ? '' : 'اختر تاريخ المستند.'; },
-      reference: function (input) { return input.value.trim() ? '' : 'أدخل رقم الإذن أو الفاتورة.'; },
-      party: function (input) { return input.value.trim() ? '' : 'أدخل الجهة المستفيدة أو المورّدة.'; }
-    };
-  }
-
-  function quickMovementType() {
-    return dom.quickMovementTypeOut.checked ? 'OUT' : 'IN';
-  }
-
-  function selectedQuickMovementItem() {
-    var id = dom.quickMovementItem.value;
-    return state.quickMovementItems.find(function (item) { return String(item.id) === String(id); }) ||
-      state.catalogItems.find(function (item) { return String(item.id) === String(id); }) || null;
-  }
-
-  function populateQuickMovementItems(items) {
-    if (!dom.quickMovementItem) return;
-    var selectedId = dom.quickMovementItem.value;
-    var activeItems = (items || []).filter(function (item) { return item && item.active !== false; });
-    state.quickMovementItems = dedupeById(activeItems);
-    clearNode(dom.quickMovementItem);
-    var placeholder = document.createElement('option');
-    placeholder.value = '';
-    placeholder.textContent = activeItems.length ? 'اختر صنفاً من النتائج' : 'لا توجد أصناف مطابقة';
-    dom.quickMovementItem.appendChild(placeholder);
-    state.quickMovementItems.forEach(function (item) {
-      var option = document.createElement('option');
-      option.value = item.id;
-      option.textContent = (item.code || '—') + ' — ' + (item.name || '—') + ' — ' + formatNumber(itemQuantity(item)) + ' ' + (item.unit || '');
-      dom.quickMovementItem.appendChild(option);
-    });
-    if (state.quickMovementItems.some(function (item) { return String(item.id) === String(selectedId); })) {
-      dom.quickMovementItem.value = selectedId;
-    }
-    renderQuickMovementPreview();
-  }
-
-  function scheduleQuickMovementSearch() {
-    window.clearTimeout(state.quickMovementSearchTimer);
-    var query = dom.quickMovementSearch.value.trim();
-    if (!query) {
-      populateQuickMovementItems(state.catalogItems);
-      return;
-    }
-    state.quickMovementSearchTimer = window.setTimeout(function () {
-      var requestId = ++state.quickMovementRequestId;
-      dom.quickMovementItem.disabled = true;
-      rpc('listItems', { query: query, status: 'ACTIVE', page: 1, pageSize: 12 }).then(function (data) {
-        if (requestId !== state.quickMovementRequestId) return;
-        populateQuickMovementItems(normalizeCollection(data, 'items'));
-      }).catch(function (error) {
-        if (requestId !== state.quickMovementRequestId || handlePossibleAuthError(error)) return;
-        showInlineError(dom.quickMovementError, error.message || 'تعذّر البحث في الأصناف.');
-      }).finally(function () {
-        if (requestId === state.quickMovementRequestId) dom.quickMovementItem.disabled = false;
-      });
-    }, 250);
-  }
-
-  function renderQuickMovementPreview() {
-    renderMovementContext(dom.quickMovementContext, selectedQuickMovementItem(), quickMovementType(), Number(dom.quickMovementQuantity.value) || 0);
-    if (dom.quickMovementQuantity.dataset.touched === 'true') validateField(dom.quickMovementQuantity, quickMovementValidators());
-    if (dom.quickMovementItem.dataset.touched === 'true') validateField(dom.quickMovementItem, quickMovementValidators());
-  }
-
-  function updateQuickMovementType() {
-    var incoming = quickMovementType() === 'IN';
-    dom.quickMovementSubmit.classList.toggle('button--movement-in', incoming);
-    dom.quickMovementSubmit.classList.toggle('button--movement-out', !incoming);
-    dom.quickMovementSubmit.querySelector('.button__label').textContent = state.quickMovementCorrection ? 'حفظ التصحيح (عكس + بديل)' : (incoming ? 'ترحيل الإدخال' : 'ترحيل الصرف');
-    dom.quickMovementReference.placeholder = incoming ? 'مثال: INV-1042' : 'مثال: OUT-1042';
-    renderQuickMovementPreview();
-  }
-
-  function focusQuickMovement(type) {
-    if (!canWriteMovements()) return;
-    dom.quickMovementTypeOut.checked = String(type).toUpperCase() === 'OUT';
-    dom.quickMovementTypeIn.checked = !dom.quickMovementTypeOut.checked;
-    updateQuickMovementType();
-    dom.operationRail.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    window.setTimeout(function () { dom.quickMovementSearch.focus({ preventScroll: true }); }, 250);
-  }
-
-  function resetQuickMovementForm() {
-    if (!dom.quickMovementForm) return;
-    dom.quickMovementForm.reset();
-    dom.quickMovementTypeIn.checked = true;
-    dom.quickMovementDate.value = localDateKey(new Date());
-    dom.quickMovementOperator.textContent = state.user ? state.user.displayName || state.user.username || '—' : '—';
-    state.quickMovementClientRequestId = newClientRequestId();
-    state.quickMovementCorrection = null;
-    dom.quickMovementCancelCorrection.hidden = true;
-    hideInlineError(dom.quickMovementError);
-    resetFormValidation(dom.quickMovementForm);
-    populateQuickMovementItems(state.catalogItems);
-    updateQuickMovementType();
-  }
-
-  function handleQuickMovementSubmit(event) {
-    event.preventDefault();
-    hideInlineError(dom.quickMovementError);
-    var validators = quickMovementValidators();
-    if (!validateForm(dom.quickMovementForm, validators)) return;
-    var item = selectedQuickMovementItem();
-    if (!item) return;
-    var correction = state.quickMovementCorrection;
-    var payload = {
-      itemId: item.id,
-      type: quickMovementType(),
-      quantity: Number(dom.quickMovementQuantity.value),
-      documentDate: dom.quickMovementDate.value,
-      party: dom.quickMovementParty.value.trim(),
-      reference: dom.quickMovementReference.value.trim(),
-      notes: dom.quickMovementNotes.value.trim(),
-      clientRequestId: state.quickMovementClientRequestId
-    };
-    if (correction) {
-      payload.movementId = correction.movement.id;
-      payload.reason = correction.reason;
-    }
-    setLoading(dom.quickMovementSubmit, true);
-    rpc(correction ? 'correctMovement' : 'saveMovement', payload).then(function (result) {
-      var label = correction ? 'تم حفظ التصحيح' : (quickMovementType() === 'IN' ? 'تم ترحيل الإدخال' : 'تم ترحيل الصرف');
-      showToast(label, 'حُفظت الحركة باسم المستخدم الحالي وتحدّث الرصيد.', 'success');
-      announce(label + '.');
-      showAuditWarning(result);
-      resetQuickMovementForm();
-      return refreshAfterInventoryMutation();
-    }).catch(function (error) {
-      if (handlePossibleAuthError(error)) return;
-      showInlineError(dom.quickMovementError, error.message || 'تعذّر ترحيل الحركة. راجع البيانات وحاول مرة أخرى.');
-    }).finally(function () { setLoading(dom.quickMovementSubmit, false); });
-  }
-
-  function focusQuickItemForm() {
-    if (!state.user || state.user.role !== 'ADMIN') return;
-    resetQuickItemForm();
-    dom.quickItemPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    window.setTimeout(function () { dom.quickItemCode.focus({ preventScroll: true }); }, 250);
-  }
-
-  function editQuickItem(item) {
-    if (!state.user || state.user.role !== 'ADMIN' || !item) return;
-    state.quickItemEditing = item;
-    dom.quickItemId.value = item.id || '';
-    dom.quickItemCode.value = item.code || '';
-    dom.quickItemCode.disabled = true;
-    dom.quickItemName.value = item.name || '';
-    dom.quickItemOwner.value = item.owner || '';
-    dom.quickItemUnit.value = item.unit || 'قطعة';
-    dom.quickItemReorder.value = item.reorderLevel === undefined ? 0 : item.reorderLevel;
-    dom.quickItemActive.value = item.active === false ? 'false' : 'true';
-    dom.quickItemOpeningField.hidden = true;
-    dom.quickItemSubmit.querySelector('.button__label').textContent = 'حفظ التعديلات';
-    dom.quickItemCancel.hidden = false;
-    hideInlineError(dom.quickItemError);
-    resetFormValidation(dom.quickItemForm);
-    dom.quickItemPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    window.setTimeout(function () { dom.quickItemName.focus({ preventScroll: true }); }, 250);
-  }
-
-  function resetQuickItemForm() {
-    if (!dom.quickItemForm) return;
-    state.quickItemEditing = null;
-    dom.quickItemForm.reset();
-    dom.quickItemId.value = '';
-    dom.quickItemCode.disabled = false;
-    dom.quickItemUnit.value = 'قطعة';
-    dom.quickItemOpening.value = 0;
-    dom.quickItemReorder.value = 0;
-    dom.quickItemActive.value = 'true';
-    dom.quickItemOpeningField.hidden = false;
-    dom.quickItemSubmit.querySelector('.button__label').textContent = 'إضافة الصنف';
-    dom.quickItemCancel.hidden = true;
-    hideInlineError(dom.quickItemError);
-    resetFormValidation(dom.quickItemForm);
-  }
-
-  function handleQuickItemSubmit(event) {
-    event.preventDefault();
-    hideInlineError(dom.quickItemError);
-    if (!validateForm(dom.quickItemForm)) return;
-    var editing = state.quickItemEditing;
-    var payload = {
-      code: dom.quickItemCode.value.trim(),
-      name: dom.quickItemName.value.trim(),
-      owner: dom.quickItemOwner.value.trim(),
-      unit: dom.quickItemUnit.value.trim(),
-      reorderLevel: Number(dom.quickItemReorder.value),
-      active: dom.quickItemActive.value === 'true'
-    };
-    if (editing) payload.id = editing.id;
-    else payload.openingQuantity = Number(dom.quickItemOpening.value);
-    setLoading(dom.quickItemSubmit, true);
-    rpc('saveItem', payload).then(function (result) {
-      showToast(editing ? 'تم تحديث الصنف' : 'تمت إضافة الصنف', 'حُفظت البيانات وتحدّث دليل المخزون.', 'success');
-      showAuditWarning(result);
-      resetQuickItemForm();
-      state.paging.items.page = 1;
-      return refreshAfterInventoryMutation();
-    }).catch(function (error) {
-      if (handlePossibleAuthError(error)) return;
-      showInlineError(dom.quickItemError, error.message || 'تعذّر حفظ الصنف. راجع البيانات وحاول مرة أخرى.');
-    }).finally(function () { setLoading(dom.quickItemSubmit, false); });
   }
 
   function openMovementForm(source, presetType) {
@@ -2378,157 +2014,6 @@
     openEntityDialog('عكس حركة', 'تصحيح موثّق', wrapper, source);
   }
 
-  function openCorrectionDialog(movement, source) {
-    if (!canWriteMovements()) return;
-    var wrapper = document.createElement('div');
-    wrapper.appendChild(createText('p', 'muted', 'سيُحفظ السجل الأصلي. بعد مراجعة البديل في نموذج الحركة سيكتب الخادم حركة العكس والنسخة المصححة معاً في عملية واحدة.'));
-    var form = document.createElement('form');
-    form.noValidate = true;
-    var reasonField = createField({ id: 'correctionReason', name: 'reason', label: 'سبب التصحيح', type: 'textarea', required: true, maxLength: 500 });
-    form.appendChild(reasonField.wrap);
-    var submit = addFormActions(form, 'فتح نموذج التصحيح', 'button button--primary');
-    bindTouchedValidation(form);
-    form.addEventListener('submit', function (event) {
-      event.preventDefault();
-      if (!validateForm(form)) return;
-      state.quickMovementCorrection = { movement: movement, reason: reasonField.input.value.trim() };
-      dom.entityDialog.close();
-      prefillCorrectedMovement(movement).catch(function (error) {
-        state.quickMovementCorrection = null;
-        if (handlePossibleAuthError(error)) return;
-        showToast('تعذّر تجهيز التصحيح', error.message || 'حاول مرة أخرى.', 'error');
-      });
-    });
-    wrapper.appendChild(form);
-    openEntityDialog('تصحيح حركة', 'عكس ثم استبدال موثّق', wrapper, source);
-  }
-
-  function prefillCorrectedMovement(movement) {
-    var item = state.catalogItems.find(function (entry) {
-      return String(entry.id) === String(movement.itemId) || String(entry.code) === String(movement.itemCode);
-    });
-    var ready = item ? Promise.resolve([item]) : rpc('listItems', { query: movement.itemCode || movement.itemName || '', status: 'ACTIVE', page: 1, pageSize: 12 }).then(function (data) {
-      return normalizeCollection(data, 'items');
-    });
-    return ready.then(function (items) {
-      populateQuickMovementItems(items);
-      item = items.find(function (entry) {
-        return String(entry.id) === String(movement.itemId) || String(entry.code) === String(movement.itemCode);
-      }) || items[0];
-      dom.quickMovementTypeOut.checked = String(movement.type || '').toUpperCase() === 'OUT';
-      dom.quickMovementTypeIn.checked = !dom.quickMovementTypeOut.checked;
-      dom.quickMovementSearch.value = movement.itemCode || movement.itemName || '';
-      dom.quickMovementItem.value = item ? item.id : '';
-      dom.quickMovementQuantity.value = movement.quantity || '';
-      dom.quickMovementDate.value = movement.documentDate ? String(movement.documentDate).slice(0, 10) : localDateKey(new Date());
-      dom.quickMovementParty.value = movement.party || '';
-      dom.quickMovementReference.value = movement.reference || '';
-      dom.quickMovementNotes.value = 'تصحيح للحركة ' + (movement.id || '') + (movement.notes ? ' — ' + movement.notes : '');
-      state.quickMovementClientRequestId = newClientRequestId();
-      dom.quickMovementCancelCorrection.hidden = false;
-      updateQuickMovementType();
-      dom.operationRail.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      window.setTimeout(function () { dom.quickMovementQuantity.focus({ preventScroll: true }); }, 250);
-      showToast('جاهز لتسجيل التصحيح', 'راجع البيانات وعدّل المطلوب ثم رحّل الحركة المصححة.', 'success');
-    });
-  }
-
-  function openItemDetails(item, source) {
-    var wrapper = createElement('div', 'item-detail');
-    var summary = createElement('dl', 'item-detail__summary');
-    [
-      ['الرمز', item.code || '—'],
-      ['المالك', item.owner || 'غير محدد'],
-      ['الوحدة', item.unit || '—'],
-      ['الرصيد الافتتاحي', formatNumber(firstDefined(item, ['openingQuantity', 'opening']) || 0)],
-      ['الرصيد الحالي', formatNumber(itemQuantity(item))],
-      ['حد إعادة الطلب', formatNumber(item.reorderLevel || 0)]
-    ].forEach(function (entry) {
-      var row = document.createElement('div');
-      append(row, createText('dt', '', entry[0]), createText('dd', entry[0] === 'الرمز' ? 'mono' : '', entry[1]));
-      summary.appendChild(row);
-    });
-    var toolbar = createElement('div', 'dialog-actions');
-    var print = actionButton('report', 'طباعة بطاقة الصنف', 'button button--secondary');
-    print.disabled = true;
-    toolbar.appendChild(print);
-    var stateBox = createElement('div', 'section-state');
-    renderLoading(stateBox);
-    var tableFrame = createElement('div', 'table-frame table-frame--embedded');
-    var table = document.createElement('table');
-    var caption = createText('caption', 'sr-only', 'أحدث حركات الصنف');
-    var head = document.createElement('thead');
-    var headRow = document.createElement('tr');
-    ['التاريخ', 'النوع', 'الكمية', 'الجهة', 'المرجع', 'المستخدم'].forEach(function (label) {
-      var th = createText('th', '', label); th.scope = 'col'; headRow.appendChild(th);
-    });
-    head.appendChild(headRow);
-    var body = document.createElement('tbody');
-    append(table, caption, head, body); tableFrame.appendChild(table);
-    append(wrapper, summary, toolbar, stateBox, tableFrame);
-    openEntityDialog(item.name || 'بطاقة الصنف', 'الرصيد والحركات', wrapper, source);
-    rpc('listMovements', { itemQuery: item.code || item.name || '', page: 1, pageSize: 50 }).then(function (data) {
-      var rows = normalizeCollection(data, 'movements').filter(function (movement) {
-        return String(movement.itemId) === String(item.id) || String(movement.itemCode) === String(item.code);
-      });
-      clearNode(stateBox);
-      clearNode(body);
-      if (!rows.length) {
-        renderEmpty(stateBox, 'movements', 'لا توجد حركات مسجلة لهذا الصنف حتى الآن.');
-      } else {
-        rows.forEach(function (movement) {
-          var tr = document.createElement('tr');
-          addCell(tr, 'التاريخ', formatDate(movement.documentDate || movement.timestamp, false));
-          addCell(tr, 'النوع', movementTypeBadge(movement.type));
-          addCell(tr, 'الكمية', formatNumber(movement.quantity), { mono: true });
-          addCell(tr, 'الجهة', movement.party || '—');
-          addCell(tr, 'المرجع', movement.reference || '—', { auto: true });
-          addCell(tr, 'المستخدم', movement.actor && (movement.actor.displayName || movement.actor.username) || movement.actorDisplayName || movement.actorUsername || '—');
-          body.appendChild(tr);
-        });
-      }
-      print.disabled = false;
-      print.addEventListener('click', function () { printItemCard(item, rows); });
-    }).catch(function (error) {
-      if (handlePossibleAuthError(error)) return;
-      renderError(stateBox, error.message || 'تعذّر تحميل حركات الصنف.');
-    });
-  }
-
-  function printItemCard(item, movements) {
-    var reportWindow = window.open('', '_blank');
-    if (!reportWindow) {
-      showToast('تعذّر فتح بطاقة الصنف', 'اسمح بالنوافذ المنبثقة ثم أعد المحاولة.', 'error');
-      return;
-    }
-    try { reportWindow.opener = null; } catch (ignored) { /* Some browsers make opener read-only. */ }
-    var doc = reportWindow.document;
-    doc.documentElement.lang = 'ar'; doc.documentElement.dir = 'rtl'; doc.title = 'بطاقة الصنف ' + (item.code || '');
-    clearNode(doc.head); clearNode(doc.body);
-    var charset = doc.createElement('meta'); charset.setAttribute('charset', 'utf-8');
-    var style = doc.createElement('style');
-    style.textContent = ':root{color-scheme:light;--print-paper:Canvas;--print-ink:CanvasText;--print-rule:ButtonBorder;--print-fill:ButtonFace;--print-font:Arial,"Noto Sans Arabic",sans-serif}@page{size:A4 landscape;margin:12mm}*{box-sizing:border-box}body{font-family:var(--print-font);color:var(--print-ink);background:var(--print-paper);margin:0;line-height:1.55}main{max-width:100%}h1{font-size:22px;margin:0 0 6px}.meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:16px 0;padding:12px;border:1px solid var(--print-rule)}table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid var(--print-rule);padding:7px;text-align:right}th{background:var(--print-fill)}.number{direction:ltr;font-variant-numeric:tabular-nums}@media print{thead{display:table-header-group}tr{break-inside:avoid}}';
-    append(doc.head, charset, style);
-    var main = doc.createElement('main');
-    main.appendChild(pdfText(doc, 'h1', 'بطاقة حركة صنف — ' + (item.name || '')));
-    var meta = doc.createElement('section'); meta.className = 'meta';
-    pdfMetaEntry(doc, meta, 'الرمز', item.code || '—');
-    pdfMetaEntry(doc, meta, 'المالك', item.owner || 'غير محدد');
-    pdfMetaEntry(doc, meta, 'الوحدة', item.unit || '—');
-    pdfMetaEntry(doc, meta, 'الرصيد الافتتاحي', formatNumber(firstDefined(item, ['openingQuantity', 'opening']) || 0));
-    pdfMetaEntry(doc, meta, 'الرصيد الحالي', formatNumber(itemQuantity(item)));
-    pdfMetaEntry(doc, meta, 'تاريخ الطباعة', formatDate(new Date().toISOString(), true));
-    main.appendChild(meta);
-    main.appendChild(buildPdfTable(doc,
-      ['التاريخ', 'النوع', 'الكمية', 'الجهة', 'المرجع', 'المستخدم'],
-      (movements || []).map(function (movement) {
-        return [formatDate(movement.documentDate || movement.timestamp, false), movement.type || '—', movement.quantity, movement.party || '—', movement.reference || '—', movement.actor && (movement.actor.displayName || movement.actor.username) || movement.actorDisplayName || movement.actorUsername || '—'];
-      }), [2]
-    ));
-    doc.body.appendChild(main);
-    window.setTimeout(function () { reportWindow.focus(); reportWindow.print(); }, 250);
-  }
-
   function openProvidedCatalogImport(source) {
     if (!state.user || state.user.role !== 'ADMIN') return;
     var wrapper = document.createElement('div');
@@ -2701,11 +2186,10 @@
       applyBootstrap(data);
       renderDashboard();
       renderReport();
-      return Promise.all([
-        loadItems(),
-        loadMovements(),
-        state.dashboardLoadedDays !== state.dashboardDays ? loadDashboard(true) : Promise.resolve()
-      ]);
+      if (state.currentView === 'dashboard' && state.dashboardLoadedDays !== state.dashboardDays) return loadDashboard(true);
+      if (state.currentView === 'movements') return loadMovements();
+      if (state.currentView === 'items') return loadItems();
+      return null;
     }).catch(function (error) {
       if (handlePossibleAuthError(error)) return;
       showToast('تم الحفظ مع تعذّر التحديث', 'أعد تحميل العرض لرؤية أحدث البيانات.', 'error');
@@ -2911,22 +2395,21 @@
     viewport.content = 'width=device-width, initial-scale=1';
     var style = doc.createElement('style');
     style.textContent = [
-      ':root{color-scheme:light;--print-paper:Canvas;--print-ink:CanvasText;--print-muted:GrayText;--print-rule:ButtonBorder;--print-fill:ButtonFace;--print-font:Arial,"Noto Sans Arabic",sans-serif}',
       '@page{size:A4 landscape;margin:12mm}',
       '*{box-sizing:border-box}',
-      'body{font-family:var(--print-font);color:var(--print-ink);background:var(--print-paper);margin:0;line-height:1.55}',
+      'body{font-family:Arial,"Noto Sans Arabic",sans-serif;color:#172033;background:#fff;margin:0;line-height:1.55}',
       'main{max-width:100%;margin:0 auto}',
       'h1{font-size:24px;margin:0 0 4px}',
       'h2{font-size:17px;margin:22px 0 8px}',
-      'p{margin:3px 0;color:var(--print-muted)}',
-      '.meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px 14px;margin:14px 0;padding:10px;border:1px solid var(--print-rule);border-radius:8px}',
-      '.meta div{font-size:12px}.meta strong{display:block;color:var(--print-ink)}',
+      'p{margin:3px 0;color:#4b5565}',
+      '.meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px 14px;margin:14px 0;padding:10px;border:1px solid #d8dee8;border-radius:8px}',
+      '.meta div{font-size:12px}.meta strong{display:block;color:#172033}',
       'table{width:100%;border-collapse:collapse;font-size:11px;margin-top:6px}',
-      'th,td{border:1px solid var(--print-rule);padding:6px 7px;text-align:right;vertical-align:top}',
-      'th{background:var(--print-fill);color:var(--print-ink);font-weight:700}',
-      'tbody tr:nth-child(even){background:var(--print-fill)}',
+      'th,td{border:1px solid #cfd6e1;padding:6px 7px;text-align:right;vertical-align:top}',
+      'th{background:#eaf8fc;color:#10283a;font-weight:700}',
+      'tbody tr:nth-child(even){background:#f7f9fc}',
       '.number{font-variant-numeric:tabular-nums;direction:ltr;text-align:left}',
-      '.note{font-size:11px;color:var(--print-muted)}',
+      '.note{font-size:11px;color:#5c6678}',
       '@media print{.print-note{display:none}thead{display:table-header-group}tr{break-inside:avoid}}'
     ].join('');
     append(doc.head, charset, viewport, style);
@@ -2974,7 +2457,6 @@
     var params = state.movementReportParams || {
       query: dom.movementQuery.value.trim(),
       type: dom.movementTypeFilter.value,
-      owner: dom.movementOwnerFilter.value,
       itemLabel: 'كل الأصناف',
       dateFrom: dom.movementDateFrom.value,
       dateTo: dom.movementDateTo.value
@@ -2982,7 +2464,6 @@
     return [
       ['نوع الحركة', typeLabels[params.type] || params.type],
       ['الصنف', params.itemLabel || 'كل الأصناف'],
-      ['المالك', params.owner || 'كل المالكين'],
       ['من تاريخ', params.dateFrom || 'غير محدد'],
       ['إلى تاريخ', params.dateTo || 'غير محدد'],
       ['البحث', params.query || 'بدون عبارة بحث']

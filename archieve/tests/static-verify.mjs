@@ -40,29 +40,6 @@ const rpcNames = [...new Set([...scriptMatch[1].matchAll(/rpc\('([^']+)'/g)].map
 const missingRpcFunctions = rpcNames.filter((name) => !backendFunctions.has(name));
 if (missingRpcFunctions.length) throw new Error(`Missing backend RPC functions: ${missingRpcFunctions.join(', ')}`);
 
-const onePageRequirements = [
-  ['operation rail', /id="operationRail"/],
-  ['quick movement form', /id="quickMovementForm"/],
-  ['quick item form', /id="quickItemForm"/],
-  ['owner summary', /id="ownersSummary"/],
-  ['movement report', /id="movementReportPanel"/],
-  ['report dialog', /<dialog\s+id="reportsDialog"/],
-  ['role administration dialog', /<dialog\s+id="adminDialog"/]
-];
-onePageRequirements.forEach(([label, pattern]) => {
-  if (!pattern.test(index)) throw new Error(`Missing one-page workflow element: ${label}`);
-});
-if (/class="sidebar"/.test(index)) throw new Error('The retired multi-page sidebar must not return.');
-if (/ACTIVE_USER/.test(backend) || /ACTIVE_USER/.test(app)) throw new Error('A global ACTIVE_USER property must never identify a session.');
-if (!/window\.sessionStorage\.setItem\(SESSION_KEY/.test(app)) throw new Error('Same-tab session persistence is missing.');
-if (!/PASSWORD_MIN_LENGTH:\s*6/.test(backend)) throw new Error('Password minimum must remain six characters.');
-if (!backendFunctions.has('correctMovement') || !backendFunctions.has('appendMovementRecords_')) {
-  throw new Error('Atomic correction must batch the reversal and corrected replacement.');
-}
-['ADMIN', 'STOREKEEPER', 'AUDITOR'].forEach((role) => {
-  if (!backend.includes(`'${role}'`)) throw new Error(`Required role is missing: ${role}`);
-});
-
 const unsafeChecks = [
   ['innerHTML assignment', /\.innerHTML\s*=/],
   ['outerHTML assignment', /\.outerHTML\s*=/],
@@ -86,6 +63,5 @@ console.log('manifest JSON: ok');
 console.log(`frontend syntax: ok (${ids.length} unique IDs, ${cachedIds.length} cached)`);
 console.log(`icons: ok (${iconUses.length} uses, ${symbols.size} symbols)`);
 console.log(`RPC mappings: ok (${rpcNames.length})`);
-console.log('one-page workflow/session invariants: ok');
 console.log(`design tokens: aligned (${Object.keys(tokenValues).length})`);
 console.log('unsafe-pattern scan: clean');

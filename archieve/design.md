@@ -5,14 +5,13 @@ this file as its source of truth.
 
 ## Genre
 
-Modern-minimal, adapted for a dense, form-first operational workbench.
+Modern-minimal, adapted for a dense operational dashboard.
 
 ## Macrostructure family
 
-- Application: **Workbench, form-rail variant** — one continuous operational page with a permanent incoming/outgoing rail beside compact analytics, followed by the movement report and searchable inventory ledger.
+- App views: **Workbench** — persistent operational navigation, compact metrics, tabular work areas, and forms beside the data they change.
 - Login: **Split diptych** — identity and system status on one side, the single sign-in action on the other.
 - Reports: **Tabular spec sheet** — visible values and labelled thresholds; colour is never the only signal.
-- Utilities: native modal dialogs for reports/backups, user administration, item cards, import confirmation, and audited correction/reversal.
 
 ## Theme
 
@@ -47,9 +46,9 @@ Four-point named scale in `tokens.css`. Components consume named tokens only.
 
 ## Navigation and footer
 
-- Navigation: N13-inspired search-led app bar with in-page anchors; no separate application pages or desktop sidebar.
+- Navigation: N13-inspired search-led app bar; grouped search, keyboard navigation, Escape close.
 - Footer: Ft2 compact single-line system/status footer.
-- Mobile navigation becomes a five-action shortcut bar; tables become labelled cards and the movement form remains first in reading order.
+- Mobile navigation becomes a five-action bottom bar; tables become labelled cards.
 
 ## Role model
 
@@ -73,17 +72,13 @@ Four-point named scale in `tokens.css`. Components consume named tokens only.
 
 ## Incoming and outgoing workflow
 
-- Entry points are always distinct: **إدخال مخزون** and **صرف مخزون**. The original two-card type switch stays visible in the main movement form; correction actions reuse that form after recording the reversal.
+- Entry points are always distinct: **إدخال مخزون** and **صرف مخزون**. The dialog still allows switching type through the original two-card incoming/outgoing control.
 - Item selection is searchable by code or name and supports server-side lookup when the catalog is too large for the bootstrap payload.
 - After selecting an item, show its unit, current balance, reorder level, and a current → projected balance preview before posting.
 - Document date, document/invoice number, party, and quantity are required. Apps Script records the authoritative server timestamp and authenticated operator.
 - Posted movements are append-only. Corrections create a separately audited reversal instead of editing or deleting the source movement.
 
 ## Exports
-
-- Movement reports share the applied item, owner, type, and date filters.
-- Filtered results export to Excel-compatible CSV and printable Arabic PDF previews.
-- Complete system backups remain real `.xlsx` files created by Apps Script in Google Drive.
 
 ### tokens.css
 

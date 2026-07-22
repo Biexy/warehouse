@@ -38,20 +38,10 @@
     { id: 'MOV-1042', timestamp: '2026-07-21T09:42:00.000Z', documentDate: '2026-07-21', type: 'OUT', itemId: 'ITM-2', itemCode: 'VALVE-204', itemName: 'صمام تحكم نحاسي', quantity: 2, balanceBefore: 5, balanceAfter: 3, party: 'قسم الصيانة', reference: 'ISS-884', notes: '', canReverse: true, reversed: false, actor: { username: 'admin', displayName: 'مدير النظام' } },
     { id: 'MOV-1041', timestamp: '2026-07-20T12:10:00.000Z', documentDate: '2026-07-20', type: 'IN', itemId: 'ITM-1', itemCode: 'PUMP-017', itemName: 'مضخة مياه صناعية', quantity: 4, balanceBefore: 8, balanceAfter: 12, party: 'المورد المحلي', reference: 'REC-332', notes: '', canReverse: true, reversed: false, actor: { username: 'admin', displayName: 'مدير النظام' } }
   ];
-  items.forEach(function (item) {
-    item.totalIncoming = movements.filter(function (movement) { return movement.itemId === item.id && movement.type === 'IN'; }).reduce(function (sum, movement) { return sum + movement.quantity; }, 0);
-    item.totalOutgoing = movements.filter(function (movement) { return movement.itemId === item.id && movement.type === 'OUT'; }).reduce(function (sum, movement) { return sum + movement.quantity; }, 0);
-  });
   var users = [
     { id: 'USR-1', username: 'admin', displayName: 'مدير النظام', role: 'ADMIN', active: true, forcePasswordChange: false, lastLoginAt: '2026-07-21T09:30:00.000Z' },
-    { id: 'USR-2', username: 'امين_المخزن', displayName: 'أمين المخزن', role: 'STOREKEEPER', active: true, forcePasswordChange: false, lastLoginAt: '2026-07-20T08:00:00.000Z' },
-    { id: 'USR-3', username: 'auditor', displayName: 'المراقب الداخلي', role: 'AUDITOR', active: true, forcePasswordChange: false, lastLoginAt: '2026-07-19T10:15:00.000Z' }
+    { id: 'USR-2', username: 'امين_المخزن', displayName: 'أمين المخزن', role: 'STOREKEEPER', active: true, forcePasswordChange: false, lastLoginAt: '2026-07-20T08:00:00.000Z' }
   ];
-
-  function previewUser() {
-    var requestedRole = String(new URLSearchParams(window.location.search).get('role') || 'ADMIN').toUpperCase();
-    return users.find(function (user) { return user.role === requestedRole; }) || users[0];
-  }
 
   function dashboard(days) {
     days = [7, 30, 90].indexOf(Number(days)) === -1 ? 30 : Number(days);
@@ -117,14 +107,6 @@
       outgoingQuantity: outgoingQuantity,
       mixedUnits: true
     };
-    var ownerSummaryMap = items.reduce(function (result, item) {
-      var owner = item.owner || 'غير محدد';
-      if (!result[owner]) result[owner] = { owner: owner, itemCount: 0, currentQuantity: 0, actionNeededCount: 0 };
-      result[owner].itemCount += 1;
-      result[owner].currentQuantity += item.currentQuantity;
-      if (item.stockStatus !== 'OK') result[owner].actionNeededCount += 1;
-      return result;
-    }, {});
     return {
       generatedAt: '2026-07-21T12:00:00.000Z',
       range: { days: days, from: trend[0].date, to: trend[trend.length - 1].date, dateBasis: 'DOCUMENT_DATE_OR_SERVER_TIMESTAMP' },
@@ -159,7 +141,6 @@
       rangeFlow: rangeFlow,
       dailyMovementTrend: trend,
       movementTrend: trend,
-      ownerSummary: Object.keys(ownerSummaryMap).map(function (owner) { return ownerSummaryMap[owner]; }),
       urgentItems: urgentItems,
       recentMovements: movements
     };
@@ -198,13 +179,11 @@
     params = params || {};
     var query = String(params.query || '').trim().toLocaleLowerCase('ar');
     var itemQuery = String(params.itemQuery || '').trim().toLocaleLowerCase('ar');
-    var owner = String(params.owner || '').trim();
     var type = String(params.type || '').toUpperCase();
     return movements.filter(function (movement) {
       if (type && movement.type !== type) return false;
       if (params.itemId && movement.itemId !== params.itemId) return false;
       var currentItem = items.find(function (item) { return item.id === movement.itemId; });
-      if (owner && (!currentItem || currentItem.owner !== owner)) return false;
       var itemHaystack = [movement.itemCode, movement.itemName, currentItem && currentItem.code, currentItem && currentItem.name, currentItem && currentItem.owner].join(' ').toLocaleLowerCase('ar');
       if (itemQuery && itemHaystack.indexOf(itemQuery) === -1) return false;
       if (params.dateFrom && movement.documentDate < params.dateFrom) return false;
@@ -252,16 +231,9 @@
   }
 
   function bootstrap() {
-    var user = previewUser();
     return {
-      user: user,
-      permissions: {
-        canManageItems: user.role === 'ADMIN',
-        canCreateMovements: user.role === 'ADMIN' || user.role === 'STOREKEEPER',
-        canReverseMovements: user.role === 'ADMIN' || user.role === 'STOREKEEPER',
-        canManageUsers: user.role === 'ADMIN',
-        canCreateBackups: user.role === 'ADMIN'
-      },
+      user: users[0],
+      permissions: { canManageItems: true, canCreateMovements: true, canReverseMovements: true, canManageUsers: true, canCreateBackups: true },
       passwordChangeRequired: false,
       dashboard: dashboard(30),
       items: items.slice(0, 50),
@@ -274,7 +246,7 @@
 
   function handle(method, args) {
     var payload = args.length > 1 ? args[1] || {} : args[0] || {};
-    if (method === 'authenticate') return { token: 'wms_preview_token_1234567890123456789012345678901234567890', expiresAt: '2026-07-21T15:30:00.000Z', user: previewUser() };
+    if (method === 'authenticate') return { token: 'wms_preview_token_1234567890123456789012345678901234567890', expiresAt: '2026-07-21T15:30:00.000Z', user: users[0] };
     if (method === 'getBootstrap') return bootstrap();
     if (method === 'getDashboard') return dashboard(payload.days);
     if (method === 'listItems') {
@@ -291,7 +263,6 @@
     if (method === 'listUsers') return paginate(users, payload, 'users');
     if (method === 'logout') return { loggedOut: true };
     if (method === 'saveMovement') return { movement: movements[0] };
-    if (method === 'correctMovement') return { reversal: movements[0], movement: movements[1], originalMovementId: payload.movementId, deduplicated: false };
     if (method === 'reverseMovement') return { movement: movements[0] };
     if (method === 'saveItem') return { item: items[0] };
     if (method === 'importProvidedCatalog') {
