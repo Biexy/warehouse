@@ -461,7 +461,7 @@
     });
   }
 
-  function openPasswordHelp(){el('passwordHelpModal').classList.remove('hidden');document.body.classList.add('overflow-hidden');var button=el('passwordHelpModal').querySelector('button');if(button)button.focus();}
+  function openPasswordHelp(){var modal=el('passwordHelpModal');if(modal.parentNode!==document.body)document.body.appendChild(modal);modal.classList.remove('hidden');document.body.classList.add('overflow-hidden');var button=modal.querySelector('button');if(button)button.focus();}
   function closePasswordHelp(){el('passwordHelpModal').classList.add('hidden');releaseManagedModalScroll();}
 
   function openBackupModal(){el('backupModal').classList.remove('hidden');} function closeBackupModal(){el('backupModal').classList.add('hidden');}

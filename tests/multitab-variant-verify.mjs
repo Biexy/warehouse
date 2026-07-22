@@ -114,5 +114,7 @@ assert.match(app, /DOMContentLoaded[\s\S]{0,5000}(?:validateOrLogin|resume\w*Ses
 for (const authFailure of ['SESSION_EXPIRED', 'INVALID_SESSION', 'SESSION_INVALIDATED', 'AUTH_REQUIRED']) {
   assertIncludes(app, authFailure, `${authFailure} does not force a return to login`);
 }
+assert.match(index, /login-help-button[^>]*onclick="[^"]*passwordHelpModal/, 'multitab reset-password link must have a direct modal fallback');
+assert.match(app, /function openPasswordHelp\(\)\{var modal=el\('passwordHelpModal'\);if\(modal\.parentNode!==document\.body\)document\.body\.appendChild\(modal\)/, 'multitab password-help modal must escape the hidden warehouse app before opening');
 
 console.log('warehouse-multitab UI: five tabs, pagination, permissions, modals, and session flow verified');

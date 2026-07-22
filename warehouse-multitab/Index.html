@@ -340,7 +340,7 @@
                     </form>
                     <div class="login-help">
                         <span>تعذر عليك الدخول؟</span>
-                        <button type="button" class="login-help-button" onclick="openPasswordHelp()"><i class="fa-solid fa-key" aria-hidden="true"></i>إعادة تعيين كلمة المرور</button>
+                        <button type="button" class="login-help-button" onclick="if(window.openPasswordHelp){window.openPasswordHelp();}else{var modal=document.getElementById('passwordHelpModal');document.body.appendChild(modal);modal.classList.remove('hidden');}"><i class="fa-solid fa-key" aria-hidden="true"></i>إعادة تعيين كلمة المرور</button>
                     </div>
                 </div>
             </div>
@@ -963,14 +963,14 @@
     </div>
 
     <!-- مساعدة إعادة تعيين كلمة المرور -->
-    <div id="passwordHelpModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-[70] flex items-center justify-center hidden p-4" role="dialog" aria-modal="true" aria-labelledby="passwordHelpTitle">
+    <div id="passwordHelpModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center hidden p-4" style="z-index: 90" role="dialog" aria-modal="true" aria-labelledby="passwordHelpTitle">
         <div class="bg-brand-darkBlue border border-gray-800 max-w-md w-full rounded-3xl shadow-2xl p-6 relative text-right">
-            <button type="button" onclick="closePasswordHelp()" class="absolute top-5 left-5 text-gray-400 hover:text-white text-xl" aria-label="إغلاق مساعدة كلمة المرور"><i class="fa-solid fa-circle-xmark" aria-hidden="true"></i></button>
+            <button type="button" onclick="if(window.closePasswordHelp){window.closePasswordHelp();}else{document.getElementById('passwordHelpModal').classList.add('hidden');}" class="absolute top-5 left-5 text-gray-400 hover:text-white text-xl" aria-label="إغلاق مساعدة كلمة المرور"><i class="fa-solid fa-circle-xmark" aria-hidden="true"></i></button>
             <div class="w-12 h-12 bg-brand-neon/10 border border-brand-neon/20 rounded-2xl flex items-center justify-center mb-4 text-brand-neon text-xl"><i class="fa-solid fa-key" aria-hidden="true"></i></div>
             <h3 id="passwordHelpTitle" class="section-heading text-lg font-bold text-white">إعادة تعيين كلمة المرور</h3>
             <p class="section-description text-xs mt-2">للموظف: اطلب من مدير النظام فتح «إدارة المستخدمين والصلاحيات» ثم اختيار «إعادة تعيين كلمة المرور» بجانب حسابك.</p>
             <p class="section-description text-xs mt-3">لحساب المدير: افتح ملف Google Sheets كمالك، ثم اختر «نظام المخزون ← استعادة دخول المدير» للحصول على كلمة مرور مؤقتة.</p>
-            <button type="button" onclick="closePasswordHelp()" class="mt-5 w-full min-h-11 bg-brand-neon text-brand-navy font-bold text-xs rounded-xl">فهمت</button>
+            <button type="button" onclick="if(window.closePasswordHelp){window.closePasswordHelp();}else{document.getElementById('passwordHelpModal').classList.add('hidden');}" class="mt-5 w-full min-h-11 bg-brand-neon text-brand-navy font-bold text-xs rounded-xl">فهمت</button>
         </div>
     </div>
 

@@ -53,5 +53,7 @@ assert.match(app, /reportItems\.reduce/);
 assert.match(app, /catalogImportCompleted/);
 assert.match(index, /responsive-card-table/);
 assert.match(index, /@media \(max-width: 640px\)/);
+assert.match(index, /login-help-button[^>]*onclick="[^"]*passwordHelpModal/, 'login reset-password link must have a direct modal fallback');
+assert.match(app, /function openPasswordHelp\(\)\{var modal=el\('passwordHelpModal'\);if\(modal\.parentNode!==document\.body\)document\.body\.appendChild\(modal\)/, 'password-help modal must be moved outside the hidden warehouse app before opening');
 
 console.log('quick patch UI invariants: ok');
