@@ -115,7 +115,7 @@ for (const authFailure of ['SESSION_EXPIRED', 'INVALID_SESSION', 'SESSION_INVALI
   assertIncludes(app, authFailure, `${authFailure} does not force a return to login`);
 }
 assert.match(index, /login-help-button[^>]*onclick="[^"]*passwordHelpModal/, 'multitab reset-password link must have a direct modal fallback');
-assert.match(app, /function openPasswordHelp\(\)\{var modal=el\('passwordHelpModal'\);if\(modal\.parentNode!==document\.body\)document\.body\.appendChild\(modal\)/, 'multitab password-help modal must escape the hidden warehouse app before opening');
+assert.match(app, /function openPasswordHelp\(\)\{[\s\S]{0,300}var modal=el\('passwordHelpModal'\);if\(modal\.parentNode!==document\.body\)document\.body\.appendChild\(modal\)/, 'multitab password-help modal must escape the hidden warehouse app before opening');
 assertIncludes(index, 'workspace-nav-heading', 'desktop side-navigation heading is missing');
 assert.match(index, /\.workspace-tabs-shell\s*\{[^}]*position:\s*fixed[^}]*width:\s*15rem/s, 'desktop navigation must be a fixed side rail');
 assertIncludes(index, 'class="app-footer', 'professional multitab footer is missing');

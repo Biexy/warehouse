@@ -8,8 +8,9 @@
     items: [], itemPage: 1, itemPageSize: 10, itemTotal: 0, owners: [],
     movements: [], movementPage: 1, movementPageSize: 25, movementTotal: 0,
     catalog: [], selectedTransactionItem: null, correctionCatalog: [], editingItem: null, editingMovement: null, activeItem: null,
-    users: [], stockChart: null, requestIds: Object.create(null),
+    users: [], stockChart: null, requestIds: Object.create(null), bootstrapInFlight: false,
     itemEditReturnFocus: null, movementCorrectionReturnFocus: null, reportReturnFocus: null,
+    passwordHelpReturnFocus: null, passwordChangeReturnFocus: null,
     bulkImportRows: [], bulkImportPreview: null, bulkImportReturnFocus: null
   };
 
@@ -22,16 +23,47 @@
   function newRequestId(prefix) { return (prefix || 'REQ') + '-' + Date.now() + '-' + Math.random().toString(36).slice(2) + '-' + Math.random().toString(36).slice(2); }
   function debounce(fn, wait) { var timer; return function () { var args = arguments; clearTimeout(timer); timer = setTimeout(function () { fn.apply(null, args); }, wait); }; }
 
+  var SESSION_ERROR_CODES_ = ['SESSION_EXPIRED', 'INVALID_SESSION', 'SESSION_INVALIDATED', 'AUTH_REQUIRED'];
+
+  function isSessionError_(error) { return Boolean(error && SESSION_ERROR_CODES_.indexOf(error.code) !== -1); }
+  function safeErrorDetails_(error) {
+    var details = error && error.details;
+    if (!details || typeof details !== 'object' || Array.isArray(details)) return '';
+    var labels = { field: 'الحقل', sheet: 'الورقة', header: 'العنوان', canonical: 'الاسم المعتمد', legacy: 'الاسم السابق', lockedUntil: 'إعادة المحاولة بعد', method: 'العملية', incidentId: 'رقم التتبع' };
+    return Object.keys(labels).map(function (key) {
+      var value = details[key];
+      if (value == null || value === '' || typeof value === 'object') return '';
+      return labels[key] + ': ' + String(value).slice(0, 160);
+    }).filter(Boolean).join(' · ');
+  }
+  function formatError_(error, includeDetails) {
+    var message = error && error.message ? String(error.message) : 'تعذر إتمام الطلب.';
+    var code = error && error.code ? String(error.code) : '';
+    var details = includeDetails ? safeErrorDetails_(error) : '';
+    return message + (code ? ' · ' + code : '') + (details ? ' · ' + details : '');
+  }
+  function resetPasswordVisibility_() {
+    ['loginPassword', 'authPasswordInput', 'newPasswordInput', 'confirmPasswordInput'].forEach(function (id) {
+      var input = el(id); if (!input) return; input.type = 'password';
+      var button = document.querySelector('[data-password-toggle="' + id + '"]');
+      if (!button) return; button.setAttribute('aria-pressed', 'false'); button.setAttribute('aria-label', 'إظهار كلمة المرور');
+      var icon = button.querySelector('i'); if (icon) icon.className = 'fa-solid fa-eye';
+    });
+  }
+
   function rpc(name) {
     var args = Array.prototype.slice.call(arguments, 1);
     return new Promise(function (resolve, reject) {
       if (!window.google || !google.script || !google.script.run) return reject({ code: 'PREVIEW_UNAVAILABLE', message: 'واجهة الخادم غير متاحة في هذه المعاينة.' });
       var runner = google.script.run.withSuccessHandler(function (result) {
         if (result && result.ok) return resolve(result.data);
-        var error = result && result.error || { code: 'INTERNAL_ERROR', message: 'تعذر إتمام الطلب.' };
-        if (['SESSION_EXPIRED', 'INVALID_SESSION', 'SESSION_INVALIDATED', 'AUTH_REQUIRED'].indexOf(error.code) !== -1) clearSession(true);
+        var error = result && result.error || { code: 'INVALID_RPC_RESPONSE', message: 'استجاب الخادم بصيغة غير متوقعة.', details: { method: name } };
+        if (isSessionError_(error) && state.token) clearSession(true, error);
         reject(error);
-      }).withFailureHandler(function () { reject({ code: 'NETWORK_ERROR', message: 'تعذر الاتصال بالخادم. حاول مجدداً.' }); });
+      }).withFailureHandler(function (failure) {
+        var failureMessage = failure && failure.message ? String(failure.message).trim().slice(0, 300) : '';
+        reject({ code: 'RPC_FAILURE', message: failureMessage || 'تعذر الاتصال بالخادم. حاول مجدداً.', details: { method: name } });
+      });
       runner[name].apply(runner, args);
     });
   }
@@ -53,8 +85,8 @@
 
   function showError(target, error) {
     var node = typeof target === 'string' ? el(target) : target;
-    if (node) { node.textContent = error && error.message || 'تعذر إتمام الطلب.'; node.classList.remove('hidden'); }
-    else showToast(error && error.message || 'تعذر إتمام الطلب.', 'error');
+    if (node) { node.textContent = formatError_(error, true); node.classList.remove('hidden'); }
+    else showToast(formatError_(error, true), 'error');
   }
 
   function setSyncStatus(connected, isError) {
@@ -63,23 +95,32 @@
     label.textContent = isError ? 'تعذر الاتصال بالنظام' : connected ? 'متصل ومزامن مع النظام' : 'جارٍ المزامنة…';
   }
 
-  function clearSession(showLogin) {
+  function showLoginNotice_(message) {
+    var notice = el('loginNotice'); if (!notice) return;
+    el('loginError').classList.add('hidden'); notice.textContent = message; notice.classList.remove('hidden');
+  }
+
+  function clearSession(showLogin, error) {
     try { sessionStorage.removeItem(SESSION_KEY); } catch (ignored) {}
-    state.token = ''; state.user = null; state.passwordChangeRequired = false;
-    el('loginAuthModal').classList.add('hidden'); el('passwordChangeForm').reset(); el('passwordChangeError').classList.add('hidden');
+    state.token = ''; state.user = null; state.passwordChangeRequired = false; state.bootstrapInFlight = false;
+    state.passwordHelpReturnFocus = null; state.passwordChangeReturnFocus = null;
+    el('loginAuthModal').classList.add('hidden'); el('passwordHelpModal').classList.add('hidden'); el('passwordChangeForm').reset(); el('passwordChangeError').classList.add('hidden');
+    resetPasswordVisibility_(); updatePasswordChangeFeedback(); document.body.classList.remove('overflow-hidden');
     el('warehouseApp').classList.add('hidden'); el('startupState').classList.add('hidden');
-    if (showLogin !== false) el('loginView').classList.remove('hidden');
+    el('startupState').setAttribute('aria-busy', 'false'); el('startupActions').classList.add('hidden');
+    el('loginError').classList.add('hidden'); el('loginNotice').classList.add('hidden');
+    if (showLogin !== false) {
+      el('loginView').classList.remove('hidden');
+      if (error) showError('loginError', error);
+      window.requestAnimationFrame(function () { el('loginUsername').focus(); });
+    }
   }
 
   async function validateOrLogin() {
     var token = ''; try { token = sessionStorage.getItem(SESSION_KEY) || ''; } catch (ignored) {}
     if (!token) return clearSession(true);
-    el('loginView').classList.add('hidden'); el('startupState').classList.remove('hidden'); state.token = token;
-    try { await bootstrap(); el('startupState').classList.add('hidden'); }
-    catch (error) {
-      if (!state.token) return;
-      showBootstrapFailure_(error);
-    }
+    el('loginView').classList.add('hidden'); state.token = token;
+    await runBootstrap_();
   }
 
   async function bootstrap() {
@@ -100,7 +141,7 @@
   }
 
   async function handleLogin(event) {
-    event.preventDefault(); var button = el('loginSubmit'); el('loginError').classList.add('hidden'); busy(button, true, 'جارٍ التحقق…');
+    event.preventDefault(); var button = el('loginSubmit'); el('loginError').classList.add('hidden'); el('loginNotice').classList.add('hidden'); busy(button, true, 'جارٍ التحقق…');
     var result;
     try {
       result = await rpc('authenticate', { username: el('loginUsername').value.trim(), password: el('loginPassword').value });
@@ -109,33 +150,36 @@
     }
     state.token = result.token;
     try { sessionStorage.setItem(SESSION_KEY, result.token); } catch (ignored) { showToast('تم الدخول، لكن المتصفح لم يسمح بحفظ الجلسة بعد إغلاق الصفحة.', 'warning'); }
-    el('loginPassword').value = ''; el('loginView').classList.add('hidden'); showBootstrapLoading_();
-    try { await bootstrap(); el('startupState').classList.add('hidden'); }
-    catch (error) { if (state.token) showBootstrapFailure_(error); }
-    finally { busy(button, false); }
+    el('loginPassword').value = ''; resetPasswordVisibility_(); el('loginView').classList.add('hidden');
+    try { await runBootstrap_(); } finally { busy(button, false); }
   }
 
   function showBootstrapLoading_() {
-    el('startupState').classList.remove('hidden');
+    el('startupState').classList.remove('hidden'); el('startupState').setAttribute('aria-busy', 'true');
     el('startupSpinner').classList.remove('hidden');
     el('startupMessage').textContent = 'جارٍ التحقق من الجلسة وتحميل البيانات…';
     el('startupErrorCode').textContent = '';
     el('startupErrorCode').classList.add('hidden');
-    el('startupActions').classList.add('hidden');
+    el('startupActions').classList.add('hidden'); el('retryBootstrapButton').disabled = true;
   }
   function showBootstrapFailure_(error) {
     el('warehouseApp').classList.add('hidden'); el('loginView').classList.add('hidden'); el('startupState').classList.remove('hidden');
     el('startupSpinner').classList.add('hidden');
-    el('startupMessage').textContent = 'تم تسجيل الدخول بنجاح، لكن تعذر تحميل بيانات المخزون. أعد المحاولة دون إدخال كلمة المرور مرة أخرى.';
-    el('startupErrorCode').textContent = (error && error.message ? error.message : 'تعذر تحميل البيانات.') + (error && error.code ? ' · ' + error.code : '');
-    el('startupErrorCode').classList.remove('hidden'); el('startupActions').classList.remove('hidden');
+    el('startupState').setAttribute('aria-busy', 'false');
+    el('startupMessage').textContent = 'تم التحقق من الجلسة، لكن تعذر تحميل بيانات المخزون. أعد المحاولة دون إدخال كلمة المرور مرة أخرى.';
+    el('startupErrorCode').textContent = formatError_(error || { message: 'تعذر تحميل البيانات.' }, true);
+    el('startupErrorCode').classList.remove('hidden'); el('startupActions').classList.remove('hidden'); el('retryBootstrapButton').disabled = false;
+    window.requestAnimationFrame(function () { el('retryBootstrapButton').focus(); });
   }
-  async function retryBootstrap() {
-    if (!state.token) return clearSession(true);
+  async function runBootstrap_() {
+    if (state.bootstrapInFlight) return false;
+    state.bootstrapInFlight = true;
     showBootstrapLoading_();
-    try { await bootstrap(); el('startupState').classList.add('hidden'); }
-    catch (error) { if (state.token) showBootstrapFailure_(error); }
+    try { await bootstrap(); el('startupState').classList.add('hidden'); return true; }
+    catch (error) { if (state.token) showBootstrapFailure_(error); return false; }
+    finally { state.bootstrapInFlight = false; }
   }
+  async function retryBootstrap() { if (!state.token) return clearSession(true); await runBootstrap_(); }
   function loginWithAnotherAccount() { handleLogout(); }
 
   async function handleLogout() {
@@ -148,7 +192,7 @@
     var button = el('passwordChangeSubmit'); busy(button, true, 'جارٍ الحفظ…');
     try {
       await rpc('changeMyPassword', state.token, { currentPassword: el('authPasswordInput').value, newPassword: el('newPasswordInput').value });
-      el('loginAuthModal').classList.add('hidden'); showToast('تم تغيير كلمة المرور. سجّل الدخول مجدداً.', 'success'); clearSession(true);
+      clearSession(true); showLoginNotice_('تم تغيير كلمة المرور بنجاح. سجّل الدخول بكلمة المرور الجديدة.');
     } catch (error) { showError(errorNode, error); } finally { busy(button, false); }
   }
 
@@ -161,15 +205,19 @@
 
   function showPasswordChangeModal_(required) {
     state.passwordChangeRequired = Boolean(required);
-    el('passwordChangeForm').reset(); el('passwordChangeError').classList.add('hidden'); updatePasswordChangeFeedback();
+    state.passwordChangeReturnFocus = required ? null : document.activeElement;
+    el('passwordChangeForm').reset(); el('passwordChangeError').classList.add('hidden'); resetPasswordVisibility_(); updatePasswordChangeFeedback();
     el('loginTargetUserLabel').textContent = required ? 'غيّر كلمة المرور المؤقتة قبل متابعة العمل.' : 'استخدم كلمة المرور الحالية لتعيين كلمة مرور جديدة.';
     el('passwordChangeCancelButton').textContent = required ? 'خروج' : 'إلغاء';
-    el('loginAuthModal').classList.remove('hidden'); el('authPasswordInput').focus();
+    el('loginAuthModal').classList.remove('hidden'); document.body.classList.add('overflow-hidden');
+    window.requestAnimationFrame(function () { el('authPasswordInput').focus(); });
   }
   function openPasswordChangeModal() { showPasswordChangeModal_(false); }
   function cancelPasswordChange() {
     if (state.passwordChangeRequired) return handleLogout();
-    el('loginAuthModal').classList.add('hidden'); el('passwordChangeForm').reset(); el('passwordChangeError').classList.add('hidden');
+    var returnFocus = state.passwordChangeReturnFocus; state.passwordChangeReturnFocus = null;
+    el('loginAuthModal').classList.add('hidden'); el('passwordChangeForm').reset(); el('passwordChangeError').classList.add('hidden'); resetPasswordVisibility_(); updatePasswordChangeFeedback(); releaseManagedModalScroll();
+    if (returnFocus && document.contains(returnFocus)) window.requestAnimationFrame(function () { returnFocus.focus(); });
   }
 
   function applyDashboard(dashboard) {
@@ -570,8 +618,8 @@
     });
   }
 
-  function openPasswordHelp(){var modal=el('passwordHelpModal');if(modal.parentNode!==document.body)document.body.appendChild(modal);modal.classList.remove('hidden');document.body.classList.add('overflow-hidden');var button=modal.querySelector('button');if(button)button.focus();}
-  function closePasswordHelp(){el('passwordHelpModal').classList.add('hidden');releaseManagedModalScroll();}
+  function openPasswordHelp(){state.passwordHelpReturnFocus=document.activeElement;var modal=el('passwordHelpModal');if(modal.parentNode!==document.body)document.body.appendChild(modal);modal.classList.remove('hidden');document.body.classList.add('overflow-hidden');var button=modal.querySelector('button');if(button)window.requestAnimationFrame(function(){button.focus();});}
+  function closePasswordHelp(){var returnFocus=state.passwordHelpReturnFocus;state.passwordHelpReturnFocus=null;el('passwordHelpModal').classList.add('hidden');releaseManagedModalScroll();if(returnFocus&&document.contains(returnFocus))window.requestAnimationFrame(function(){returnFocus.focus();});}
 
   function openBackupModal(){el('backupModal').classList.remove('hidden');} function closeBackupModal(){el('backupModal').classList.add('hidden');}
   async function configureBackup(){var b=el('configureBackupButton');busy(b,true,'جارٍ الحفظ…');try{var r=await rpc('configureBackupFolder',state.token,{folderId:el('backupFolderInput').value});el('backupStatus').textContent='تم اعتماد المجلد: '+r.folderName;}catch(e){el('backupStatus').textContent=e.message;}finally{busy(b,false);}}
@@ -598,17 +646,19 @@
 
   function releaseManagedModalScroll() {
     var passwordHelpOpen = !el('passwordHelpModal').classList.contains('hidden');
+    var passwordChangeOpen = !el('loginAuthModal').classList.contains('hidden');
     var itemOpen = !el('itemEditModal').classList.contains('hidden');
     var correctionOpen = !el('movementCorrectionModal').classList.contains('hidden');
     var reportOpen = !el('reportPreviewModal').classList.contains('hidden');
-    if (!passwordHelpOpen && !itemOpen && !correctionOpen && !reportOpen) document.body.classList.remove('overflow-hidden');
+    if (!passwordHelpOpen && !passwordChangeOpen && !itemOpen && !correctionOpen && !reportOpen) document.body.classList.remove('overflow-hidden');
   }
   function handleManagedModalKeydown(event) {
-    var modal = !el('passwordHelpModal').classList.contains('hidden') ? el('passwordHelpModal') : !el('movementCorrectionModal').classList.contains('hidden') ? el('movementCorrectionModal') : !el('itemEditModal').classList.contains('hidden') ? el('itemEditModal') : !el('reportPreviewModal').classList.contains('hidden') ? el('reportPreviewModal') : null;
+    var modal = !el('passwordHelpModal').classList.contains('hidden') ? el('passwordHelpModal') : !el('loginAuthModal').classList.contains('hidden') ? el('loginAuthModal') : !el('movementCorrectionModal').classList.contains('hidden') ? el('movementCorrectionModal') : !el('itemEditModal').classList.contains('hidden') ? el('itemEditModal') : !el('reportPreviewModal').classList.contains('hidden') ? el('reportPreviewModal') : null;
     if (!modal) return;
     if (event.key === 'Escape') {
       event.preventDefault();
       if (modal.id === 'passwordHelpModal') closePasswordHelp();
+      else if (modal.id === 'loginAuthModal') { if (!state.passwordChangeRequired) cancelPasswordChange(); }
       else if (modal.id === 'movementCorrectionModal') closeMovementCorrectionModal();
       else if (modal.id === 'itemEditModal') closeItemEditModal();
       else closeReportPreview();
@@ -624,8 +674,8 @@
   document.addEventListener('DOMContentLoaded',function(){
     el('bulkImportFile').addEventListener('change',handleBulkImportFile);el('bulkImportModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closeBulkImportModal();});
     el('loginForm').addEventListener('submit',handleLogin);el('trxItemSearch').addEventListener('input',function(){renderTransactionItemResults();debouncedCatalog();});el('trxItemSearch').addEventListener('focus',renderTransactionItemResults);el('trxItemClear').addEventListener('click',clearTransactionItemSelection);el('trxChangeItemButton').addEventListener('click',clearTransactionItemSelection);el('trxQtyDecrease').addEventListener('click',function(){adjustTrxQuantity(-1);});el('trxQtyIncrease').addEventListener('click',function(){adjustTrxQuantity(1);});el('trxQty').addEventListener('input',updateBalancePreview);el('newPasswordInput').addEventListener('input',updatePasswordChangeFeedback);el('confirmPasswordInput').addEventListener('input',updatePasswordChangeFeedback);el('correctionItemSearch').addEventListener('input',debouncedCorrectionCatalog);document.querySelectorAll('input[name="trxType"]').forEach(function(r){r.addEventListener('change',updateBalancePreview);});
-    document.querySelectorAll('[data-password-toggle]').forEach(function(button){button.addEventListener('click',function(){var input=el(button.dataset.passwordToggle);input.type=input.type==='password'?'text':'password';button.querySelector('i').className=input.type==='password'?'fa-solid fa-eye':'fa-solid fa-eye-slash';});});
-    el('passwordHelpModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closePasswordHelp();});el('itemEditModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closeItemEditModal();});el('movementCorrectionModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closeMovementCorrectionModal();});el('reportPreviewModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closeReportPreview();});document.addEventListener('keydown',handleManagedModalKeydown);
+    document.querySelectorAll('[data-password-toggle]').forEach(function(button){button.setAttribute('aria-pressed','false');button.addEventListener('click',function(){var input=el(button.dataset.passwordToggle),willShow=input.type==='password';input.type=willShow?'text':'password';button.setAttribute('aria-pressed',String(willShow));button.setAttribute('aria-label',willShow?'إخفاء كلمة المرور':'إظهار كلمة المرور');button.querySelector('i').className=input.type==='password'?'fa-solid fa-eye':'fa-solid fa-eye-slash';});});
+    el('passwordHelpModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closePasswordHelp();});el('loginAuthModal').addEventListener('click',function(event){if(event.target===event.currentTarget&&!state.passwordChangeRequired)cancelPasswordChange();});el('itemEditModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closeItemEditModal();});el('movementCorrectionModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closeMovementCorrectionModal();});el('reportPreviewModal').addEventListener('click',function(event){if(event.target===event.currentTarget)closeReportPreview();});document.addEventListener('keydown',handleManagedModalKeydown);
 
     window.openPasswordChangeModal = openPasswordChangeModal; window.cancelPasswordChange = cancelPasswordChange; window.retryBootstrap = retryBootstrap; window.loginWithAnotherAccount = loginWithAnotherAccount;
     window.openBulkImportModal=openBulkImportModal;window.closeBulkImportModal=closeBulkImportModal;window.commitBulkItemImport=commitBulkItemImport;window.downloadItemImportTemplate=downloadItemImportTemplate;

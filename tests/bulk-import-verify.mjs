@@ -35,7 +35,6 @@ const context = vm.createContext({
     if (!code) throw new WarehouseError('VALIDATION_ERROR', 'كود الصنف مطلوب.');
     return code;
   },
-  normalizeCatalogText_(value) { return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase(); },
   requireObject_(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new WarehouseError('VALIDATION_ERROR', 'الصف غير صالح.');
     return value;

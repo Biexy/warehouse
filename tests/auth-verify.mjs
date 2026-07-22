@@ -225,6 +225,7 @@ function createHarness() {
   const properties = new ScriptProperties();
   const spreadsheet = new MemorySpreadsheet();
   const spreadsheets = new Map([[spreadsheet.getId(), spreadsheet]]);
+  const lockControl = { failNext: false, waits: 0, releases: 0 };
   const identity = {
     effectiveEmail: 'warehouse-owner@example.com',
     ownerEmail: 'warehouse-owner@example.com'
@@ -274,7 +275,16 @@ function createHarness() {
       }
     },
     LockService: {
-      getScriptLock: () => ({ waitLock() {}, releaseLock() {} })
+      getScriptLock: () => ({
+        waitLock() {
+          lockControl.waits += 1;
+          if (lockControl.failNext) {
+            lockControl.failNext = false;
+            throw new Error('simulated concurrent lock holder');
+          }
+        },
+        releaseLock() { lockControl.releases += 1; }
+      })
     },
     Logger: { log() {} },
     PropertiesService: { getScriptProperties: () => properties },
@@ -316,7 +326,7 @@ function createHarness() {
     vm.runInContext(source, context, { filename: file });
   }
 
-  return { cache, context, identity, properties, spreadsheet, ui };
+  return { cache, context, identity, lockControl, properties, spreadsheet, ui };
 }
 
 function initialize(harness) {
@@ -493,6 +503,72 @@ const tests = [
     const fresh = assertOk(harness.context.login('admin', 'An0ther!Secure#Pass'));
     assertOk(harness.context.logout(fresh.token));
     assertRpcError(harness.context.listUsers(fresh.token, {}), 'SESSION_EXPIRED');
+  }],
+
+  ['expired sessions fail bootstrap and are removed from the session cache', () => {
+    const { harness, password } = installAndSetPassword();
+    const login = assertOk(harness.context.login('admin', password));
+    const cacheKey = harness.context.sessionCacheKey_(login.token);
+    const cacheEntry = harness.cache.entries.get(cacheKey);
+    assert.ok(cacheEntry, 'issued session was not cached');
+    cacheEntry.expiresAt = Date.now() - 1;
+
+    assertRpcError(harness.context.getBootstrap(login.token), 'SESSION_EXPIRED');
+    assert.equal(harness.cache.entries.has(cacheKey), false, 'expired cache entry was not removed');
+  }],
+
+  ['administrator reset revokes target sessions and supports a complete new-password login', () => {
+    const { harness, password } = installAndSetPassword();
+    const administrator = assertOk(harness.context.login('admin', password));
+    const created = assertOk(harness.context.saveUser(administrator.token, {
+      username: 'reset-target',
+      displayName: 'Reset target',
+      role: 'STOREKEEPER',
+      active: true
+    }));
+    const firstTargetLogin = assertOk(harness.context.login('reset-target', created.temporaryPassword));
+    assertOk(harness.context.changeMyPassword(firstTargetLogin.token, {
+      currentPassword: created.temporaryPassword,
+      newPassword: 'TargetBeforeReset'
+    }));
+    const staleTargetSession = assertOk(harness.context.login('reset-target', 'TargetBeforeReset'));
+
+    const reset = assertOk(harness.context.resetUserPassword(administrator.token, { userId: created.user.id }));
+    assertRpcError(harness.context.getBootstrap(staleTargetSession.token), 'SESSION_INVALIDATED');
+    assertRpcError(harness.context.login('reset-target', 'TargetBeforeReset'), 'INVALID_CREDENTIALS');
+
+    const temporaryTargetLogin = assertOk(harness.context.login('reset-target', reset.temporaryPassword));
+    const forcedBootstrap = assertOk(harness.context.getBootstrap(temporaryTargetLogin.token));
+    assert.equal(forcedBootstrap.passwordChangeRequired, true);
+    assertOk(harness.context.changeMyPassword(temporaryTargetLogin.token, {
+      currentPassword: reset.temporaryPassword,
+      newPassword: 'TargetAfterReset'
+    }));
+    const currentTargetLogin = assertOk(harness.context.login('reset-target', 'TargetAfterReset'));
+    const currentBootstrap = assertOk(harness.context.getBootstrap(currentTargetLogin.token));
+    assert.equal(currentBootstrap.passwordChangeRequired, false);
+    assert.equal(currentBootstrap.user.role, 'STOREKEEPER');
+  }],
+
+  ['busy script locks fail safely without changing credentials and recover on retry', () => {
+    const { harness, password } = installAndSetPassword();
+    const active = assertOk(harness.context.login('admin', password));
+    const releasesBeforeBusyLogin = harness.lockControl.releases;
+    harness.lockControl.failNext = true;
+    assertRpcError(harness.context.login('admin', password), 'SYSTEM_BUSY');
+    assert.equal(harness.lockControl.releases, releasesBeforeBusyLogin, 'a lock that was never acquired must not be released');
+    assertOk(harness.context.login('admin', password), 'login must recover after contention clears');
+
+    const releasesBeforeBusyChange = harness.lockControl.releases;
+    harness.lockControl.failNext = true;
+    assertRpcError(harness.context.changeMyPassword(active.token, {
+      currentPassword: password,
+      newPassword: 'MustNotCommitWhileBusy'
+    }), 'SYSTEM_BUSY');
+    assert.equal(harness.lockControl.releases, releasesBeforeBusyChange, 'busy password mutation must not release an unacquired lock');
+    assertOk(harness.context.getBootstrap(active.token), 'busy mutation must leave the existing session valid');
+    assertOk(harness.context.login('admin', password), 'busy mutation must preserve the current password');
+    assertRpcError(harness.context.login('admin', 'MustNotCommitWhileBusy'), 'INVALID_CREDENTIALS');
   }],
 
   ['five wrong passwords lock the account', () => {

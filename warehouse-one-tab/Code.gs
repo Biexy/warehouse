@@ -219,8 +219,8 @@ function recoverAdministratorAccessFromSheet() {
 }
 
 function recoverAdministratorAccess_(spreadsheet, operator) {
-  return withScriptLock_(function () {
-    operator = operator || requireSpreadsheetOwner_(spreadsheet);
+  operator = operator || requireSpreadsheetOwner_(spreadsheet);
+  var preparation = withScriptLock_(function () {
     setupRepository_(spreadsheet);
     preflightAuthAudit_();
     var duplicateRepair = archiveDuplicateAdministratorRows_();
@@ -229,14 +229,7 @@ function recoverAdministratorAccess_(spreadsheet, operator) {
       throw new WarehouseError_('SYSTEM_NOT_INITIALIZED', 'لا يوجد مستخدمون. استخدم «تهيئة النظام» بدلاً من الاستعادة.');
     }
     var pepperWasMissing = !PropertiesService.getScriptProperties().getProperty(AUTH_CONFIG_.PEPPER_PROPERTY);
-    if (pepperWasMissing) {
-      ensurePasswordPepper_();
-      // A single durable epoch change invalidates every cached session, even
-      // if execution is interrupted immediately after the pepper is replaced.
-      incrementAuthEpoch_();
-    } else {
-      ensureAuthEpoch_();
-    }
+    if (!pepperWasMissing) ensureAuthEpoch_();
     var administrator = null;
     for (var i = 0; i < users.length; i += 1) {
       if (users[i].username === 'admin') administrator = users[i];
@@ -248,11 +241,38 @@ function recoverAdministratorAccess_(spreadsheet, operator) {
     }
     if (!administrator) throw new WarehouseError_('ADMIN_NOT_FOUND', 'لا يوجد حساب مدير لاستعادته.');
 
-    var temporaryPassword = generateTemporaryPassword_(administrator.username);
-    var salt = generatePasswordSalt_();
+    return {
+      administrator: administrator,
+      pepperWasMissing: pepperWasMissing,
+      duplicateAdministratorsArchived: duplicateRepair.archived
+    };
+  });
+
+  var temporaryPassword = generateTemporaryPassword_(preparation.administrator.username);
+  var salt = generatePasswordSalt_();
+  var recoveryPepper = preparation.pepperWasMissing ? randomMaterial_(8) : getPasswordPepper_();
+  var passwordHash = derivePasswordHashWithPepper_(preparation.administrator.username, temporaryPassword, salt, recoveryPepper);
+
+  return withScriptLock_(function () {
+    var properties = PropertiesService.getScriptProperties();
+    var currentPepper = properties.getProperty(AUTH_CONFIG_.PEPPER_PROPERTY);
+    if ((preparation.pepperWasMissing && currentPepper) || (!preparation.pepperWasMissing && currentPepper !== recoveryPepper)) {
+      throw new WarehouseError_('AUTH_STATE_CHANGED', 'تغيّرت حالة حماية كلمات المرور أثناء الاستعادة. أعد المحاولة.');
+    }
+    var administrator = findUserById_(preparation.administrator.id);
+    if (!administrator || administrator.username !== preparation.administrator.username || administrator.passwordHash !== preparation.administrator.passwordHash || administrator.sessionVersion !== preparation.administrator.sessionVersion) {
+      throw new WarehouseError_('USER_STATE_CHANGED', 'تغيّرت بيانات حساب المدير أثناء الاستعادة. أعد المحاولة.');
+    }
+    preflightAuthAudit_();
+    if (preparation.pepperWasMissing) {
+      // Install the replacement pepper and invalidate every cached session in
+      // the same locked commit that makes the recovered credential usable.
+      properties.setProperty(AUTH_CONFIG_.PEPPER_PROPERTY, recoveryPepper);
+      incrementAuthEpoch_();
+    }
     administrator = updateUserFields_(administrator, {
       passwordSalt: salt,
-      passwordHash: derivePasswordHash_(administrator.username, temporaryPassword, salt),
+      passwordHash: passwordHash,
       role: 'ADMIN',
       active: true,
       failedAttempts: 0,
@@ -268,8 +288,8 @@ function recoverAdministratorAccess_(spreadsheet, operator) {
       entityId: administrator.id,
       status: 'SUCCESS',
       details: {
-        pepperReprovisioned: pepperWasMissing,
-        duplicateAdministratorsArchived: duplicateRepair.archived
+        pepperReprovisioned: preparation.pepperWasMissing,
+        duplicateAdministratorsArchived: preparation.duplicateAdministratorsArchived
       }
     });
     var result = {
@@ -277,9 +297,9 @@ function recoverAdministratorAccess_(spreadsheet, operator) {
       username: administrator.username,
       temporaryPassword: temporaryPassword,
       forcePasswordChange: true,
-      pepperReprovisioned: pepperWasMissing,
-      duplicateAdministratorsArchived: duplicateRepair.archived,
-      warning: pepperWasMissing ? 'يجب إعادة تعيين كلمات مرور باقي المستخدمين من لوحة المدير.' : ''
+      pepperReprovisioned: preparation.pepperWasMissing,
+      duplicateAdministratorsArchived: preparation.duplicateAdministratorsArchived,
+      warning: preparation.pepperWasMissing ? 'يجب إعادة تعيين كلمات مرور باقي المستخدمين من لوحة المدير.' : ''
     };
     if (auditWarning) result.auditWarning = auditWarning;
     return result;

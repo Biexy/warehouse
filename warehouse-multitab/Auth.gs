@@ -40,11 +40,17 @@ function authenticate(credentials) {
     var observation = withScriptLock_(function () {
       enforceLoginRateLimit_(input.normalized);
       var observedUser = findUserByNormalizedUsername_(input.normalized);
-      return { salt: observedUser ? observedUser.passwordSalt : 'unknown-user-dummy-salt-v1' };
+      return {
+        userId: observedUser ? observedUser.id : '',
+        salt: observedUser ? observedUser.passwordSalt : 'unknown-user-dummy-salt-v1',
+        sessionVersion: observedUser ? observedUser.sessionVersion : 0
+      };
     });
     var prepared = {
       normalized: input.normalized,
+      observedUserId: observation.userId,
       observedSalt: observation.salt,
+      observedSessionVersion: observation.sessionVersion,
       candidateHash: derivePasswordHash_(input.normalized || 'unknown', input.password, observation.salt)
     };
     return withScriptLock_(function () {
@@ -64,7 +70,6 @@ function logout(token) {
   return apiResult_(function () {
     return withScriptLock_(function () {
       var session = requireSession_(token, null, { allowPasswordChange: true });
-      preflightSessionAudit_();
       CacheService.getScriptCache().remove(session.cacheKey);
       var auditWarning = appendCommittedAuthAudit_({
         actor: session.user,
@@ -116,15 +121,24 @@ function listUsers(token, params) {
 function saveUser(token, payload) {
   return apiResult_(function () {
     payload = requireObject_(payload, 'المستخدم');
-    return withScriptLock_(function () {
-      var session = requireSession_(token, ['ADMIN']);
-      if (!payload.id) {
-        var temporaryPassword = generateTemporaryPassword_(payload.username);
+    if (!payload.id) {
+      var observedSession = requireSession_(token, ['ADMIN']);
+      var username = validateUsername_(payload.username);
+      var temporaryPassword = generateTemporaryPassword_(username);
+      var salt = generatePasswordSalt_();
+      var passwordHash = derivePasswordHash_(username, temporaryPassword, salt);
+
+      return withScriptLock_(function () {
+        var session = requireSession_(token, ['ADMIN']);
+        if (session.user.id !== observedSession.user.id) {
+          throw new WarehouseError_('SESSION_INVALIDATED', 'تغيّرت جلسة المدير أثناء الطلب. سجّل الدخول مجددًا.');
+        }
         preflightAuthAudit_();
         var created = createUserRecord_({
-          username: payload.username,
+          username: username,
           displayName: payload.displayName,
-          password: temporaryPassword,
+          passwordSalt: salt,
+          passwordHash: passwordHash,
           role: payload.role,
           active: parseBoolean_(payload.active, true),
           forcePasswordChange: true,
@@ -141,8 +155,11 @@ function saveUser(token, payload) {
         var createResult = { user: publicUser_(created), temporaryPassword: temporaryPassword };
         if (createAuditWarning) createResult.auditWarning = createAuditWarning;
         return createResult;
-      }
+      });
+    }
 
+    return withScriptLock_(function () {
+      var session = requireSession_(token, ['ADMIN']);
       var user = findUserById_(requireText_(payload.id, 'معرف المستخدم', 100, false));
       if (!user) throw new WarehouseError_('USER_NOT_FOUND', 'المستخدم غير موجود.');
       if (payload.username !== undefined && validateUsername_(payload.username) !== user.username) {
@@ -183,17 +200,25 @@ function saveUser(token, payload) {
 function resetUserPassword(token, payload) {
   return apiResult_(function () {
     payload = requireObject_(payload, 'إعادة كلمة المرور');
+    var observedSession = requireSession_(token, ['ADMIN']);
+    var userId = requireText_(payload.userId || payload.id, 'معرف المستخدم', 100, false);
+    var observedUser = findUserById_(userId);
+    if (!observedUser) throw new WarehouseError_('USER_NOT_FOUND', 'المستخدم غير موجود.');
+    var temporaryPassword = generateTemporaryPassword_(observedUser.username);
+    var salt = generatePasswordSalt_();
+    var passwordHash = derivePasswordHash_(observedUser.username, temporaryPassword, salt);
+
     return withScriptLock_(function () {
       var session = requireSession_(token, ['ADMIN']);
-      var userId = payload.userId || payload.id;
-      var user = findUserById_(requireText_(userId, 'معرف المستخدم', 100, false));
+      var user = findUserById_(userId);
       if (!user) throw new WarehouseError_('USER_NOT_FOUND', 'المستخدم غير موجود.');
-      var temporaryPassword = generateTemporaryPassword_(user.username);
-      var salt = generatePasswordSalt_();
+      if (session.user.id !== observedSession.user.id || user.username !== observedUser.username || user.passwordHash !== observedUser.passwordHash || user.sessionVersion !== observedUser.sessionVersion) {
+        throw new WarehouseError_('USER_STATE_CHANGED', 'تغيّرت بيانات الحساب أثناء الطلب. أعد المحاولة.');
+      }
       preflightAuthAudit_();
       var updated = updateUserFields_(user, {
         passwordSalt: salt,
-        passwordHash: derivePasswordHash_(user.username, temporaryPassword, salt),
+        passwordHash: passwordHash,
         failedAttempts: 0,
         lockedUntil: '',
         forcePasswordChange: true,
@@ -289,6 +314,13 @@ function authenticateInternal_(prepared) {
   var user = findUserByNormalizedUsername_(normalized);
   var now = new Date();
 
+  var currentUserId = user ? user.id : '';
+  var currentSalt = user ? user.passwordSalt : 'unknown-user-dummy-salt-v1';
+  var currentSessionVersion = user ? user.sessionVersion : 0;
+  if (currentUserId !== prepared.observedUserId || currentSalt !== prepared.observedSalt || currentSessionVersion !== prepared.observedSessionVersion) {
+    throw new WarehouseError_('AUTH_RETRY_REQUIRED', 'تغيّرت بيانات الدخول أثناء التحقق. أعد المحاولة دون احتسابها محاولة فاشلة.');
+  }
+
   // A pending audit must be durably replayed before another authentication
   // state change is allowed. This prevents an audit outage from silently
   // overflowing the bounded Script Properties outbox.
@@ -353,7 +385,13 @@ function issueSession_(user) {
     issuedAt: issuedAt.toISOString(),
     expiresAt: expiresAt.toISOString()
   };
-  CacheService.getScriptCache().put(cacheKey, JSON.stringify(session), AUTH_CONFIG_.SESSION_TTL_SECONDS);
+  var encodedSession = JSON.stringify(session);
+  var sessionCache = CacheService.getScriptCache();
+  sessionCache.put(cacheKey, encodedSession, AUTH_CONFIG_.SESSION_TTL_SECONDS);
+  if (sessionCache.get(cacheKey) !== encodedSession) {
+    sessionCache.remove(cacheKey);
+    throw new WarehouseError_('SESSION_STORE_UNAVAILABLE', 'تعذر تثبيت جلسة الدخول. أعد المحاولة بعد لحظات.');
+  }
   return { token: token, expiresAt: expiresAt.toISOString() };
 }
 
@@ -489,7 +527,11 @@ function randomMaterial_(uuidCount) {
 }
 
 function derivePasswordHash_(username, password, salt) {
-  var pepper = getPasswordPepper_();
+  return derivePasswordHashWithPepper_(username, password, salt, getPasswordPepper_());
+}
+
+function derivePasswordHashWithPepper_(username, password, salt, pepper) {
+  pepper = requireText_(pepper, 'مفتاح حماية كلمات المرور', 512, false);
   var state = Utilities.computeHmacSha256Signature(
     'warehouse-password-v1\u0000' + username + '\u0000' + salt + '\u0000' + String(password),
     pepper,

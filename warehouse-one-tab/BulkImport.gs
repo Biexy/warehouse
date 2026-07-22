@@ -2,6 +2,13 @@
 
 var ITEM_FILE_IMPORT_MAX_ROWS_ = 500;
 
+/** Stable comparison key for names, owners, and units from uploaded files. */
+function normalizeCatalogText_(value) {
+  var text = value === null || value === undefined ? '' : String(value);
+  if (typeof text.normalize === 'function') text = text.normalize('NFKC');
+  return text.replace(/[\u00A0\s]+/g, ' ').trim().toLowerCase();
+}
+
 function previewItemFileImport(token, rows) {
   return apiResult_(function () {
     requireSession_(token, ['ADMIN']);
