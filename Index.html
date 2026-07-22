@@ -107,10 +107,10 @@
 
     <div id="appShell" class="app-shell app-shell--single" hidden>
       <header class="topbar topbar--workbench">
-        <button class="workbench-brand" type="button" data-nav-view="dashboard" aria-label="الانتقال إلى بداية مساحة العمل">
+        <div class="workbench-brand" aria-label="منظومة المخازن التفاعلية">
           <span class="brand-mark brand-mark--small" aria-hidden="true"><svg class="icon"><use href="#icon-box"></use></svg></span>
           <span><strong>منظومة المخازن التفاعلية</strong><small>إدارة الأصناف والحركات والتقارير في شاشة واحدة</small></span>
-        </button>
+        </div>
 
         <div id="globalSearch" class="global-search global-search--workbench">
           <svg class="icon global-search__icon" aria-hidden="true"><use href="#icon-search"></use></svg>
@@ -125,8 +125,9 @@
             <span class="status-shape status-shape--ok" aria-hidden="true"></span>
             <span id="syncStatusText">متصل بالنظام</span>
           </div>
-          <button class="button button--ghost topbar-action" type="button" data-nav-view="reports"><svg class="icon"><use href="#icon-report"></use></svg><span>التقارير</span></button>
-          <button class="button button--ghost topbar-action" type="button" data-nav-view="admin" data-role-only="ADMIN"><svg class="icon"><use href="#icon-admin"></use></svg><span>الإدارة</span></button>
+          <button class="button button--ghost topbar-action" type="button" data-action="open-administrative-report"><svg class="icon"><use href="#icon-report"></use></svg><span>معاينة التقرير</span></button>
+          <button class="button button--ghost topbar-action" type="button" data-action="open-backups" data-role-only="ADMIN"><svg class="icon"><use href="#icon-backup"></use></svg><span>النسخ الاحتياطية</span></button>
+          <button class="button button--ghost topbar-action" type="button" data-action="open-admin" data-role-only="ADMIN"><svg class="icon"><use href="#icon-admin"></use></svg><span>الإدارة</span></button>
           <div class="topbar-user">
             <div class="user-copy">
               <strong id="currentUserName"></strong>
@@ -294,13 +295,17 @@
                 <p id="movementReportDescription" class="muted">يعرض التقرير كامل النتائج المطابقة للمرشحات، ويجمع الكميات داخل كل وحدة قياس بصورة مستقلة.</p>
               </div>
               <div class="movement-report__actions" aria-label="تصدير تقرير الحركات">
+                <button id="exportMovementCsv" class="button button--secondary" type="button" disabled>
+                  <svg class="icon" aria-hidden="true"><use href="#icon-download"></use></svg>
+                  <span>تصدير الحركات CSV</span>
+                </button>
                 <button id="exportMovementExcel" class="button button--secondary" type="button" disabled>
                   <svg class="icon" aria-hidden="true"><use href="#icon-download"></use></svg>
-                  <span>Excel (CSV)</span>
+                  <span>إجماليات Excel (CSV)</span>
                 </button>
                 <button id="exportMovementPdf" class="button button--secondary" type="button" disabled>
                   <svg class="icon" aria-hidden="true"><use href="#icon-report"></use></svg>
-                  <span>تصدير إلى PDF</span>
+                  <span>PDF الإجماليات</span>
                 </button>
               </div>
             </header>
@@ -367,9 +372,13 @@
         <section id="view-items" class="app-view" data-view="items" aria-labelledby="itemsTitle">
           <div class="view-heading">
             <div><p class="eyebrow">دليل المستودع</p><h1 id="itemsTitle">الأصناف</h1><p class="muted">الكميات الحالية وحدود إعادة الطلب.</p></div>
-            <div class="view-heading__actions" data-role-only="ADMIN">
-              <button class="button button--secondary" type="button" data-action="import-provided-catalog"><svg class="icon"><use href="#icon-download"></use></svg><span>إضافة القائمة الجاهزة (76)</span></button>
-              <button class="button button--primary" type="button" data-action="focus-new-item"><svg class="icon"><use href="#icon-plus"></use></svg><span>إضافة صنف</span></button>
+            <div class="view-heading__actions">
+              <button id="exportInventoryCsv" class="button button--secondary" type="button"><svg class="icon"><use href="#icon-download"></use></svg><span>تصدير الأرصدة CSV</span></button>
+              <button class="button button--secondary" type="button" data-action="open-administrative-report"><svg class="icon"><use href="#icon-report"></use></svg><span>معاينة PDF</span></button>
+              <span class="view-heading__admin-actions" data-role-only="ADMIN">
+                <button class="button button--secondary" type="button" data-action="import-provided-catalog"><svg class="icon"><use href="#icon-download"></use></svg><span>إضافة القائمة الجاهزة (76)</span></button>
+                <button class="button button--primary" type="button" data-action="focus-new-item"><svg class="icon"><use href="#icon-plus"></use></svg><span>إضافة صنف</span></button>
+              </span>
             </div>
           </div>
           <form id="itemFilters" class="filter-bar" aria-label="تصفية الأصناف">
@@ -396,16 +405,16 @@
 
         <dialog id="reportsDialog" class="app-dialog app-dialog--wide utility-dialog" aria-labelledby="reportsTitle">
           <div class="dialog-head">
-            <div><h2>التقارير والنسخ الاحتياطية</h2><p class="muted">تصدير البيانات وإدارة النسخ الكاملة.</p></div>
+            <div><h2 id="reportsTitle">النسخ الاحتياطية</h2><p class="muted">إنشاء نسخة Excel كاملة من بيانات النظام.</p></div>
             <button id="reportsDialogClose" class="icon-button" type="button" aria-label="إغلاق التقارير"><svg class="icon"><use href="#icon-close"></use></svg></button>
           </div>
           <div class="dialog-body utility-dialog__body">
         <section id="view-reports" class="app-view utility-view" data-view="reports" aria-labelledby="reportsTitle">
           <div class="view-heading">
-            <div><p class="eyebrow">تصدير ومراجعة</p><h1 id="reportsTitle">التقارير والنسخ الاحتياطية</h1><p class="muted">نزّل البيانات الظاهرة أو أنشئ نسخة Excel كاملة وآمنة.</p></div>
+            <div><p class="eyebrow">نسخة كاملة</p><h1 id="reportsDialogBodyTitle">النسخ الاحتياطية</h1><p class="muted">أنشئ نسخة Excel كاملة وآمنة عند الحاجة.</p></div>
           </div>
           <div class="report-grid">
-            <article class="panel">
+            <article class="panel" hidden>
               <div class="panel-heading"><div><h2>تصدير بيانات CSV</h2></div><svg class="icon icon-lg panel-icon" aria-hidden="true"><use href="#icon-download"></use></svg></div>
               <p class="muted">يحتوي الملف على الصفحة والبيانات المحمّلة حالياً فقط، مع المرشحات المطبّقة؛ وليس السجل الكامل.</p>
               <div class="field"><label for="csvDataset">الصفحة المحمّلة</label><select id="csvDataset" aria-describedby="csvScopeNote"><option value="items">صفحة الأصناف المحمّلة حالياً</option><option value="movements">صفحة الحركات المحمّلة حالياً</option></select></div>
@@ -419,7 +428,7 @@
               <div id="backupResult" class="backup-result" role="status" aria-live="polite"></div>
             </article>
           </div>
-          <article class="panel report-table-panel">
+          <article class="panel report-table-panel" hidden>
             <div class="panel-heading"><div><h2>حالة الأصناف الحالية</h2></div></div>
             <div id="reportState" class="section-state" role="status" aria-live="polite"></div>
             <div class="table-frame table-frame--embedded"><table><caption class="sr-only">تقرير حالة الأصناف</caption><thead><tr><th scope="col">الرمز</th><th scope="col">الصنف</th><th scope="col">المالك</th><th scope="col">الكمية</th><th scope="col">الحد الأدنى</th><th scope="col">الحالة</th></tr></thead><tbody id="reportTableBody"></tbody></table></div>
@@ -465,13 +474,6 @@
 
       <footer class="app-footer"><span>مراقبة المخزون</span><span id="footerSession"></span></footer>
 
-      <nav class="mobile-nav" aria-label="اختصارات مساحة العمل">
-        <button class="mobile-nav__item is-active" type="button" data-nav-view="dashboard" aria-current="page"><svg class="icon"><use href="#icon-dashboard"></use></svg><span>الرئيسية</span></button>
-        <button class="mobile-nav__item" type="button" data-nav-view="movements"><svg class="icon"><use href="#icon-movements"></use></svg><span>الحركات</span></button>
-        <button class="mobile-nav__item" type="button" data-nav-view="items"><svg class="icon"><use href="#icon-items"></use></svg><span>الأصناف</span></button>
-        <button class="mobile-nav__item" type="button" data-nav-view="reports"><svg class="icon"><use href="#icon-report"></use></svg><span>التقارير</span></button>
-        <button class="mobile-nav__item" type="button" data-nav-view="admin" data-role-only="ADMIN"><svg class="icon"><use href="#icon-admin"></use></svg><span>الإدارة</span></button>
-      </nav>
     </div>
 
     <dialog id="entityDialog" class="app-dialog" aria-labelledby="entityDialogTitle">
@@ -503,6 +505,19 @@
       <dl class="credentials-list"><div><dt>اسم المستخدم</dt><dd id="credentialUsername" dir="auto"></dd></div><div><dt>كلمة المرور المؤقتة</dt><dd id="credentialPassword" dir="ltr"></dd></div></dl>
       <div id="credentialsCopyStatus" class="field-help" role="status" aria-live="polite"></div>
       <div class="dialog-actions"><button id="copyCredentialsButton" class="button button--primary" type="button"><svg class="icon"><use href="#icon-copy"></use></svg><span class="button__label">نسخ بيانات الدخول</span></button><button id="credentialsDoneButton" class="button button--secondary" type="button">تم، إغلاق</button></div>
+    </dialog>
+
+    <dialog id="administrativeReportDialog" class="app-dialog app-dialog--wide administrative-report-dialog" aria-labelledby="administrativeReportTitle">
+      <div class="dialog-head">
+        <div><p class="eyebrow">معاينة قبل التصدير</p><h2 id="administrativeReportTitle">التقرير الإداري والرقابي للمخزون</h2></div>
+        <button id="administrativeReportClose" class="icon-button" type="button" aria-label="إغلاق معاينة التقرير"><svg class="icon"><use href="#icon-close"></use></svg></button>
+      </div>
+      <div id="administrativeReportState" class="section-state" role="status" aria-live="polite"></div>
+      <div id="administrativeReportContent" class="administrative-report" dir="rtl"></div>
+      <div class="dialog-actions administrative-report__actions">
+        <button id="administrativeReportPrint" class="button button--primary" type="button" disabled><svg class="icon"><use href="#icon-report"></use></svg><span>طباعة / حفظ كملف PDF</span></button>
+        <button id="administrativeReportDone" class="button button--secondary" type="button">إغلاق</button>
+      </div>
     </dialog>
 
     <?!= include_('App'); ?>

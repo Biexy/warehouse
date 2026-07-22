@@ -126,6 +126,8 @@ const originalRequireSession = context.requireSession_;
 const originalEnsureSchema = context.ensureRepositorySchemaCurrent_;
 const originalAllItems = context.allItemRecords_;
 const originalAllMovements = context.allMovementRecords_;
+const originalInventorySnapshot = context.inventorySnapshot_;
+const originalDashboardFromSnapshot = context.dashboardFromSnapshot_;
 context.requireSession_ = () => ({ user: { id: 'USR-1', role: 'ADMIN' } });
 context.ensureRepositorySchemaCurrent_ = () => false;
 context.allItemRecords_ = () => items;
@@ -138,6 +140,31 @@ const explicitOwnerFiltered = context.listMovements('token', { owner: 'مصلح�
 assert.equal(explicitOwnerFiltered.ok, true);
 assert.equal(explicitOwnerFiltered.data.total, 3);
 assert.ok(explicitOwnerFiltered.data.movements.every((movement) => movement.itemId === 'ITM-KG'));
+
+// Full CSV/PDF exports use the same filters as the table, but never inherit
+// its pagination limit.
+context.inventorySnapshot_ = () => ({
+  items,
+  movements,
+  recentRows: movements.slice(0, 2),
+  balances: { 'ITM-KG': 12, 'ITM-PC': 16 },
+  itemStats: {
+    'ITM-KG': { totalIncoming: 5, totalOutgoing: 2, reversalNet: -1, movementCount: 3 },
+    'ITM-PC': { totalIncoming: 0, totalOutgoing: 4, reversalNet: 0, movementCount: 1 }
+  }
+});
+context.dashboardFromSnapshot_ = () => ({ summary: { totalItems: 2, actionNeededCount: 0, movementCount: 4 } });
+const pagedItems = context.listItems('token', { page: 1, pageSize: 1 });
+const completeInventoryReport = context.getInventoryReport('token', {});
+assert.equal(pagedItems.ok, true);
+assert.equal(pagedItems.data.items.length, 1);
+assert.equal(completeInventoryReport.ok, true);
+assert.equal(completeInventoryReport.data.items.length, 2, 'Inventory report must not inherit table pagination');
+assert.equal(completeInventoryReport.data.items[0].totalIncoming, 5);
+const completeMovementExport = context.getMovementExport('token', { page: 1, pageSize: 1 });
+assert.equal(completeMovementExport.ok, true);
+assert.equal(completeMovementExport.data.movements.length, 4, 'Movement export must not inherit table pagination');
+assert.equal(completeMovementExport.data.summary.movementCount, 4);
 
 // A correction validates both halves before one batch append. Retrying the
 // same client request returns the same reversal/replacement without new rows.
@@ -180,6 +207,8 @@ context.requireSession_ = originalRequireSession;
 context.ensureRepositorySchemaCurrent_ = originalEnsureSchema;
 context.allItemRecords_ = originalAllItems;
 context.allMovementRecords_ = originalAllMovements;
+context.inventorySnapshot_ = originalInventorySnapshot;
+context.dashboardFromSnapshot_ = originalDashboardFromSnapshot;
 
 // Rows containing only template/default values never become domain records.
 function makeTable(schema, rowObjects) {
@@ -219,6 +248,7 @@ console.log('inventory validation/idempotency: ok');
 console.log('inventory lifecycle guards: ok');
 console.log('movement report unit grouping: ok');
 console.log('movement item search across the complete catalog: ok');
+console.log('complete filtered inventory and movement exports: ok');
 console.log('atomic correction and retry deduplication: ok');
 console.log('template-row filtering: ok');
 console.log('quantity safety bound: ok');
